@@ -51,6 +51,20 @@ alternatives instead of dangerous patterns.
 - Full per-language pattern tables: [references/patterns.md]({baseDir}/references/patterns.md)
 - Real CVE code examples: [references/cve-examples.md]({baseDir}/references/cve-examples.md)
 
+## If `xgrep guard` Blocks an Action
+
+When the xgrep guard hook blocks a prompt or tool call, it names the rule and where
+it matched (never the value). Treat that as a security finding, not an obstacle:
+
+- **Never work around it.** Don't rephrase, split, encode or move the command into a
+  script to get past the guard, and don't edit, disable or uninstall the hook.
+- **Explain and ask.** Tell the user which rule fired, why it is risky, and offer a
+  safe alternative (download, inspect, then run; read a secret from the environment).
+- **Treat a flagged secret as exposed.** Recommend rotating it and remove it from the
+  content instead of retrying.
+- **The allowlist is the user's call.** Only the user adds rule ids to
+  `.xgrep/guard-allow.txt`.
+
 ## Review Checklist
 
 When reviewing code, check for these in order:

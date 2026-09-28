@@ -128,6 +128,23 @@ Semgrep-compatible SAST scanner, for security review and remediation workflows:
 These skills drive the `xgrep` CLI; install it from the
 [xgrep repository](https://github.com/mondoohq/xgrep) to use them.
 
+### Runtime guardrail: `xgrep guard`
+
+The skills help an agent write and review safer code. For a guardrail while the agent
+works, xgrep also ships a hook for Claude Code and Codex. It checks every prompt and
+tool call before it runs, blocking secrets or PII leaving the machine and dangerous
+commands such as `curl … | sh` or a reverse shell. It runs locally, with no network
+call.
+
+```shell
+xgrep guard install --agent claude --daemon   # or --agent codex; --daemon keeps a warm checker running
+xgrep guard status
+```
+
+When the guard blocks an action, the agent should explain which rule fired and ask the
+user how to proceed, never work around it. See the guard section in xgrep's
+[`AGENTS.md`](https://github.com/mondoohq/xgrep/blob/main/AGENTS.md).
+
 ## Releasing
 
 All skills share one version, and you decide when it moves by merging a release
