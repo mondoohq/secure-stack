@@ -1,6 +1,6 @@
 # Mondoo Skills
 
-A collection of agent skills for [xgrep](https://github.com/mondoohq/xgrep)-powered security work — code inspection, rule authoring, finding triage, and remediation. Compatible with Claude Code, Codex, Gemini CLI, and Cursor.
+A collection of agent skills for [xgrep](https://mondoo.com/docs/xgrep/)-powered security work — code inspection, rule authoring, finding triage, and remediation. Compatible with Claude Code, Codex, Gemini CLI, and Cursor.
 
 The skills in this repository follow the standardized [Agent Skills](https://agentskills.io/home) format.
 
@@ -115,7 +115,7 @@ The skills automatically activate when working on relevant tasks. You can also i
 
 ### xgrep Skills
 
-A set of skills built on [xgrep](https://github.com/mondoohq/xgrep), Mondoo's fast,
+A set of skills built on [xgrep](https://mondoo.com/docs/xgrep/), Mondoo's fast,
 Semgrep-compatible SAST scanner, for security review and remediation workflows:
 
 - **`xgrep-inspect`** - Navigate and understand source code using xgrep's AST-powered code intelligence
@@ -125,8 +125,25 @@ Semgrep-compatible SAST scanner, for security review and remediation workflows:
 - **`xgrep-fix`** - Fix a whole set of findings — or the true positives a triage report confirmed — in one pass
 - **`secure-coding`** - Proactively avoid generating vulnerable code across 7 languages
 
-These skills drive the `xgrep` CLI; install it from the
-[xgrep repository](https://github.com/mondoohq/xgrep) to use them.
+These skills drive the `xgrep` CLI; install it by following
+[Getting Started](https://mondoo.com/docs/xgrep/getting-started/) to use them.
+
+### Runtime guardrail: `xgrep guard`
+
+The skills help an agent write and review safer code. For a guardrail while the agent
+works, xgrep also ships a hook for Claude Code and Codex. It checks every prompt and
+tool call before it runs, blocking secrets or PII leaving the machine and dangerous
+commands such as `curl … | sh` or a reverse shell. It runs locally, with no network
+call.
+
+```shell
+xgrep guard install --agent claude --daemon   # or --agent codex; --daemon keeps a warm checker running
+xgrep guard status
+```
+
+When the guard blocks an action, the agent should explain which rule fired and ask the
+user how to proceed, never work around it. See
+[Guard hooks](https://mondoo.com/docs/xgrep/ai-agents/guard-hooks/) in the xgrep docs.
 
 ## Releasing
 
