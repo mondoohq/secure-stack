@@ -1,18 +1,18 @@
 {
-  "name": "mondoo-skills",
+  "name": "secure-stack",
   "owner": {
     "name": "Mondoo"
   },
   "metadata": {
-    "description": "xgrep security skills for Claude Code and other agents",
+    "description": "Tools AI coding agents use to secure your stack: code with xgrep, posture and policy with cnspec",
     "version": "1.0.1"
   },
   "plugins": [
     {
-      "name": "mondoo-skills",
+      "name": "secure-stack",
       "source": ".",
       "skills": "skills",
-      "description": "xgrep security skills for Claude Code and other agents"
+      "description": "Tools AI coding agents use to secure your stack: code with xgrep, posture and policy with cnspec"
     }
   ]
 }

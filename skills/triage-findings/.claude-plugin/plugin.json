@@ -1,0 +1,19 @@
+{
+  "name": "triage-findings",
+  "version": "1.0.1",
+  "description": "Decide whether a security finding is real — classify xgrep scan results as true or false positives by tracing dataflow and call chains with the code graph",
+  "author": {
+    "name": "Mondoo"
+  },
+  "repository": "https://github.com/mondoohq/secure-stack",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mondoo",
+    "security",
+    "triage",
+    "sast",
+    "dataflow",
+    "false-positives",
+    "xgrep"
+  ]
+}

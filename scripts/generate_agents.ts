@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Generate AGENTS.md from AGENTS_TEMPLATE.md and SKILL.md frontmatter.
+ * Generate agents/SKILLS.md from SKILLS_TEMPLATE.md and SKILL.md frontmatter.
  *
  * Also validates that marketplace.json is in sync with discovered skills,
  * that every skill's plugin.json carries the repo-wide release version,
@@ -11,20 +11,81 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { join, dirname, relative } from "path";
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), "..");
-const TEMPLATE_PATH = join(ROOT, "scripts", "AGENTS_TEMPLATE.md");
-const OUTPUT_PATH = join(ROOT, "agents", "AGENTS.md");
+const TEMPLATE_PATH = join(ROOT, "scripts", "SKILLS_TEMPLATE.md");
+const OUTPUT_PATH = join(ROOT, "agents", "SKILLS.md");
 const MARKETPLACE_PATH = join(ROOT, ".claude-plugin", "marketplace.json");
 const PLUGIN_PATH = join(ROOT, ".claude-plugin", "plugin.json");
 const README_PATH = join(ROOT, "README.md");
 
 const README_TABLE_START = "<!-- BEGIN_SKILLS_TABLE -->";
 const README_TABLE_END = "<!-- END_SKILLS_TABLE -->";
+const README_INTEGRATIONS_START = "<!-- BEGIN_INTEGRATIONS_TABLE -->";
+const README_INTEGRATIONS_END = "<!-- END_INTEGRATIONS_TABLE -->";
 
 interface Skill {
   name: string;
   description: string;
   path: string;
 }
+
+/**
+ * The secure-guard adapters, one per coding agent. All run the same two
+ * engines (xgrep + cnspec) through the shared core/engine; only the agent's I/O
+ * differs. This list is the source of truth for the README integrations table
+ * and is validated against disk (each `entry` and a README must exist) so an
+ * adapter can't be listed but missing, or shipped but undocumented.
+ */
+interface Integration {
+  agent: string;
+  shape: string;
+  dir: string;
+  entry: string;
+  install: string;
+  posture: string;
+}
+
+const INTEGRATIONS: Integration[] = [
+  {
+    agent: "Claude Code",
+    shape: "in-process mod",
+    dir: "mods/secure-guard",
+    entry: "hooks/secure-guard.mjs",
+    install: "`/plugin install secure-guard@secure-stack`",
+    posture: "shell blocks; code/IaC advisory (post-write)",
+  },
+  {
+    agent: "OpenAI Codex",
+    shape: "external pre-tool hook",
+    dir: "integrations/codex",
+    entry: "install.mjs",
+    install: "`node integrations/codex/install.mjs`",
+    posture: "shell + code + IaC block (pre-write)",
+  },
+  {
+    agent: "Mistral Vibe",
+    shape: "external pre-tool hook",
+    dir: "integrations/vibe",
+    entry: "install.mjs",
+    install: "`node integrations/vibe/install.mjs`",
+    posture: "shell + code + IaC deny (pre-write)",
+  },
+  {
+    agent: "Pi",
+    shape: "in-process TS extension",
+    dir: "integrations/pi",
+    entry: "index.ts",
+    install: "load `integrations/pi` as a Pi extension",
+    posture: "block (pre-write); `ask` via `ctx.ui.confirm`",
+  },
+  {
+    agent: "opencode",
+    shape: "in-process TS plugin",
+    dir: "integrations/opencode",
+    entry: "plugin.ts",
+    install: "copy `plugin.ts` into `.opencode/plugins/`",
+    posture: "deny via throw (pre-write); no native `ask`",
+  },
+];
 
 interface MarketplacePlugin {
   name: string;
@@ -242,38 +303,131 @@ function generateReadmeTable(skills: Skill[]): string {
   return lines.join("\n");
 }
 
+/** Replace the text between a start/end marker in `content`, keeping the markers. */
+function replaceMarked(content: string, start: string, end: string, body: string): string | null {
+  const startIdx = content.indexOf(start);
+  const endIdx = content.indexOf(end);
+  if (startIdx === -1 || endIdx === -1) {
+    console.error(`Warning: README.md markers not found (${start} / ${end}).`);
+    return null;
+  }
+  if (endIdx < startIdx) {
+    console.error(`Warning: README.md markers are in wrong order (${start} / ${end}).`);
+    return null;
+  }
+  return content.slice(0, startIdx + start.length) + "\n" + body + "\n" + content.slice(endIdx);
+}
+
+function generateIntegrationsTable(): string {
+  const lines = [
+    "| Agent | Shape | Install | Posture |",
+    "|-------|-------|---------|---------|",
+  ];
+  for (const i of INTEGRATIONS) {
+    lines.push(`| **${i.agent}** | ${i.shape} | ${i.install} | ${i.posture} |`);
+  }
+  return lines.join("\n");
+}
+
 function updateReadme(skills: Skill[]): boolean {
   if (!existsSync(README_PATH)) {
     console.error(`Warning: README.md not found at ${README_PATH}`);
     return false;
   }
 
-  const content = readFileSync(README_PATH, "utf-8");
-  const startIdx = content.indexOf(README_TABLE_START);
-  const endIdx = content.indexOf(README_TABLE_END);
+  let content = readFileSync(README_PATH, "utf-8");
+  const withSkills = replaceMarked(content, README_TABLE_START, README_TABLE_END, generateReadmeTable(skills));
+  if (withSkills === null) return false;
+  content = withSkills;
 
-  if (startIdx === -1 || endIdx === -1) {
-    console.error(
-      `Warning: README.md markers not found. Add ${README_TABLE_START} and ${README_TABLE_END} to enable table generation.`
+  // The integrations table is optional: regenerate it only if the markers exist.
+  if (content.includes(README_INTEGRATIONS_START)) {
+    const withIntegrations = replaceMarked(
+      content, README_INTEGRATIONS_START, README_INTEGRATIONS_END, generateIntegrationsTable()
     );
-    return false;
+    if (withIntegrations === null) return false;
+    content = withIntegrations;
   }
 
-  if (endIdx < startIdx) {
-    console.error("Warning: README.md markers are in wrong order.");
-    return false;
-  }
-
-  const table = generateReadmeTable(skills);
-  const newContent =
-    content.slice(0, startIdx + README_TABLE_START.length) +
-    "\n" +
-    table +
-    "\n" +
-    content.slice(endIdx);
-
-  writeFileSync(README_PATH, newContent, "utf-8");
+  writeFileSync(README_PATH, content, "utf-8");
   return true;
+}
+
+/**
+ * A valid Agent Skills `name`: 1-64 lowercase alphanumerics in single-hyphen
+ * segments — no leading/trailing hyphen, no consecutive hyphens, no uppercase.
+ * https://agentskills.io/specification
+ */
+const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * Enforce the Agent Skills spec on every skill so "we follow the spec" is a
+ * check, not a claim: the `name` must be a valid slug that equals its directory,
+ * and `description` must be 1-1024 chars. Also catch a skills/<dir>/SKILL.md that
+ * failed to parse into a usable skill — collectSkills() silently skips those, so
+ * without this they vanish from the bundle with no error.
+ */
+function validateSkillSpec(skills: Skill[]): string[] {
+  const errors: string[] = [];
+  const collectedDirs = new Set<string>();
+
+  for (const s of skills) {
+    const dir = s.path.split("/").pop() ?? s.path;
+    collectedDirs.add(dir);
+    if (s.name !== dir) {
+      errors.push(
+        `Skill '${s.name}': frontmatter name must equal its directory ('${dir}') per the Agent Skills spec`
+      );
+    }
+    if (s.name.length > 64 || !SKILL_NAME_RE.test(s.name)) {
+      errors.push(
+        `Skill '${s.name}': name must be 1-64 chars, lowercase a-z/0-9 in single-hyphen segments ` +
+          `(no leading/trailing hyphen, no '--')`
+      );
+    }
+    const desc = s.description ?? "";
+    if (desc.trim().length < 1 || desc.length > 1024) {
+      errors.push(
+        `Skill '${s.name}': description must be 1-1024 characters (found ${desc.length})`
+      );
+    }
+  }
+
+  const skillsDir = join(ROOT, "skills");
+  if (existsSync(skillsDir)) {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (!existsSync(join(skillsDir, entry.name, "SKILL.md"))) continue;
+      if (!collectedDirs.has(entry.name)) {
+        errors.push(
+          `skills/${entry.name}/SKILL.md has no valid 'name'+'description' frontmatter — ` +
+            `it would be silently dropped from the bundle`
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Every listed secure-guard adapter must exist on disk with its entry file
+ * and a README — a listed-but-missing adapter would ship a broken install link,
+ * and a shipped-but-undocumented one would be undiscoverable.
+ */
+function validateIntegrations(): string[] {
+  const errors: string[] = [];
+  for (const i of INTEGRATIONS) {
+    const entry = join(ROOT, i.dir, i.entry);
+    if (!existsSync(entry)) {
+      errors.push(`Integration '${i.agent}': entry ${i.dir}/${i.entry} is missing`);
+    }
+    const readme = join(ROOT, i.dir, "README.md");
+    if (!existsSync(readme)) {
+      errors.push(`Integration '${i.agent}': ${i.dir}/README.md is missing`);
+    }
+  }
+  return errors;
 }
 
 function validateMarketplace(skills: Skill[]): string[] {
@@ -326,6 +480,16 @@ function main(): void {
   }
   console.log("Marketplace.json validation passed.");
 
+  const specErrors = validateSkillSpec(skills);
+  if (specErrors.length > 0) {
+    console.error("\nAgent Skills spec validation errors:");
+    for (const error of specErrors) {
+      console.error(`  - ${error}`);
+    }
+    process.exit(1);
+  }
+  console.log(`Agent Skills spec OK (${skills.length} skills).`);
+
   const versionErrors = validateVersions(skills);
   if (versionErrors.length > 0) {
     console.error("\nPlugin version validation errors:");
@@ -335,6 +499,16 @@ function main(): void {
     process.exit(1);
   }
   console.log(`Plugin versions consistent at ${loadRootVersion()}.`);
+
+  const integrationErrors = validateIntegrations();
+  if (integrationErrors.length > 0) {
+    console.error("\nIntegration validation errors:");
+    for (const error of integrationErrors) {
+      console.error(`  - ${error}`);
+    }
+    process.exit(1);
+  }
+  console.log(`Integrations consistent (${INTEGRATIONS.length} agents).`);
 
   if (updateReadme(skills)) {
     console.log(`Updated ${README_PATH} skills table.`);

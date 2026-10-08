@@ -23,5 +23,5 @@
 - fix: correct marketplace.json schema
 - fix: add marketplace.json for plugin marketplace installation
 - feat: add mql-dev skill for MQL development and MCP tools
-- Initial plugin structure for mondoo-skills
+- Initial plugin structure for secure-stack
 

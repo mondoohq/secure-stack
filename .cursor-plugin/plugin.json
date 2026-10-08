@@ -1,13 +1,13 @@
 {
-  "name": "mondoo-skills",
+  "name": "secure-stack",
   "skills": "skills",
-  "description": "xgrep security skills for Claude Code and other agents",
+  "description": "Tools AI coding agents use to secure your stack: code with xgrep, posture and policy with cnspec",
   "version": "1.0.1",
   "author": {
     "name": "Mondoo"
   },
-  "homepage": "https://github.com/mondoohq/skills",
-  "repository": "https://github.com/mondoohq/skills",
+  "homepage": "https://github.com/mondoohq/secure-stack",
+  "repository": "https://github.com/mondoohq/secure-stack",
   "license": "Apache-2.0",
   "keywords": [
     "mondoo",

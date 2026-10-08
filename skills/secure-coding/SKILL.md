@@ -1,6 +1,6 @@
 ---
 name: secure-coding
-description: Review code for security vulnerabilities and provide secure coding guidance across Go, Python, JavaScript, Java, Ruby, C#, and Swift. Triggers on code review, security questions, and vulnerability prevention.
+description: Review code for security vulnerabilities and provide secure coding guidance across Go, Python, JavaScript, Java, Ruby, C#, and Swift, aligned to OWASP Top 10:2025 (application) and aware of the OWASP Top 10 for LLM & GenAI 2025. Triggers on code review, security questions, and vulnerability prevention.
 allowed-tools: Bash Read Edit Glob Grep
 ---
 
@@ -19,8 +19,8 @@ alternatives instead of dangerous patterns.
 
 ## When NOT to Use
 
-- Writing xgrep detection rules (use `xgrep-rule-creator` skill)
-- Triaging existing SAST scan findings (use `xgrep-triage` skill)
+- Authoring detection rules (use the `author-detections` skill)
+- Triaging existing SAST scan findings (use the `triage-findings` skill)
 - Non-security code questions (algorithms, performance, etc.)
 
 ## Detecting Intent
@@ -50,6 +50,36 @@ alternatives instead of dangerous patterns.
 
 - Full per-language pattern tables: [references/patterns.md]({baseDir}/references/patterns.md)
 - Real CVE code examples: [references/cve-examples.md]({baseDir}/references/cve-examples.md)
+
+## OWASP Top 10:2025 alignment
+
+This skill is the **write-it-securely-first** layer for the application categories of
+[OWASP Top 10:2025](https://top10.owasp.org/2025/). The patterns above map to:
+
+| Pattern class | OWASP Top 10:2025 |
+|---------------|-------------------|
+| SQLi, command/code injection, SSRF, path traversal, XSS, unsafe deserialization-as-injection | **A05:2025 Injection** |
+| Timing-unsafe compare, weak/deprecated crypto, `Math.random` for tokens, TLS < 1.2, JWT alg confusion, `InsecureSkipVerify` | **A04:2025 Cryptographic Failures** |
+| `pickle`/`yaml.load` RCE, untrusted-data sinks, dependency/update integrity | **A08:2025 Software or Data Integrity Failures** |
+| Secrets/PII in log output, error/stack-trace exposure | **A09:2025 Security Logging & Alerting Failures** (and LLM02, below) |
+| Missing/bypassable authorization, hardcoded credentials | **A01 / A07:2025** (code side; config side is cnspec) |
+
+**A06:2025 Insecure Design** is a design/threat-modeling concern no static check can decide —
+this skill reduces it proactively, but it stays a review-and-design item.
+
+## OWASP Top 10 for LLM & GenAI 2025 (when the code is an LLM/GenAI app)
+
+Two categories are code-level and belong here:
+
+- **LLM02 Sensitive Information Disclosure** — never put secrets or PII in prompts, model
+  inputs, logs, or error text; the "no secrets in log output" check applies to prompts too.
+- **LLM05 Improper Output Handling** — treat an **LLM's output as untrusted input**. Never
+  pass it into `eval`/`exec`, a shell, SQL, a file path, or raw HTML/markup without the same
+  validation you would apply to user input.
+
+The full engine coverage (what xgrep and cnspec detect, with honest Strong/Partial/N/A levels)
+is in [`docs/owasp.md`](../../docs/owasp.md); once code is written, the `secure-pipeline` skill
+scans, gates, and fixes it before it ships.
 
 ## If `xgrep guard` Blocks an Action
 

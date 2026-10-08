@@ -3,11 +3,11 @@ name: Validate generated artifacts
 on:
   pull_request:
     paths:
-      - "scripts/AGENTS_TEMPLATE.md"
+      - "scripts/SKILLS_TEMPLATE.md"
       - "scripts/generate_agents.ts"
       - "scripts/publish.sh"
       - "**/SKILL.md"
-      - "agents/AGENTS.md"
+      - "agents/SKILLS.md"
       - "README.md"
       - ".claude-plugin/marketplace.json"
       - ".claude-plugin/plugin.json"

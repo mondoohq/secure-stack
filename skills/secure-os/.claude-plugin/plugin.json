@@ -1,0 +1,19 @@
+{
+  "name": "secure-os",
+  "version": "1.0.1",
+  "description": "Audit and harden operating systems and network devices — scan a Linux/macOS/Windows host, container image, or network device against CIS/vendor benchmarks with cnspec",
+  "author": {
+    "name": "Mondoo"
+  },
+  "repository": "https://github.com/mondoohq/secure-stack",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mondoo",
+    "security",
+    "posture",
+    "hardening",
+    "cis",
+    "benchmark",
+    "cnspec"
+  ]
+}

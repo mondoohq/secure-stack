@@ -1,0 +1,19 @@
+{
+  "name": "author-detections",
+  "version": "1.0.1",
+  "description": "Catch a pattern nothing else catches — author a custom, tested xgrep/Semgrep detection rule (including taint-mode dataflow), or port a rule to new languages",
+  "author": {
+    "name": "Mondoo"
+  },
+  "repository": "https://github.com/mondoohq/secure-stack",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mondoo",
+    "security",
+    "detection-rules",
+    "sast",
+    "taint",
+    "semgrep",
+    "xgrep"
+  ]
+}
