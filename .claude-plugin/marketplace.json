@@ -68,6 +68,11 @@
       "source": "./skills/secure-ai-services",
       "skills": "./",
       "description": "Secure AI services and AI tooling — scan OpenAI, Anthropic, vLLM, Databricks AI, and vector stores with cnspec, and govern approved AI agents/IDE-extensions/MCP servers, mapped to the OWASP LLM Top 10"
+    },
+    {
+      "name": "secure-guard",
+      "source": "./mods/secure-guard",
+      "description": "Runtime guard as the agent works — holds risky shell commands for your OK with xgrep, and feeds xgrep code findings and cnspec IaC policy violations back to the agent right after it writes a file"
     }
   ]
 }

@@ -205,7 +205,11 @@ jobs:
             exit 1
           fi
           for f in "${skill_manifests[@]}"; do stamp_top "$f"; done
-          echo "Stamped ${#skill_manifests[@]} skill manifests + 5 top-level manifests to ${NEXT}"
+          # Mods (mods/<name>/) update in place like skills; publish.sh fails the
+          # run below if one is left unstamped.
+          mod_manifests=(mods/*/.claude-plugin/plugin.json)
+          for f in "${mod_manifests[@]}"; do stamp_top "$f"; done
+          echo "Stamped ${#skill_manifests[@]} skill manifests + ${#mod_manifests[@]} mod manifests + 5 top-level manifests to ${NEXT}"
 
       - name: Regenerate artifacts and verify consistency
         # Also the release PR's only CI: a PR opened with GITHUB_TOKEN does not
