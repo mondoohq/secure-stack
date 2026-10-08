@@ -21,6 +21,7 @@ import {
   iacAdvisoryText,
   cnspecScanArgs,
   cnspecBundlesFor,
+  extractJsonObject,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -213,4 +214,25 @@ test("advisoryText caps the list and reports the remainder", () => {
   assert.match(out, /13 high-confidence/);
   assert.match(out, /… and 3 more\.$/);
   assert.equal((out.match(/•/g) || []).length, 10);
+});
+
+// extractJsonObject: a scanner may print log/progress/summary lines AROUND the
+// JSON on stdout. The old `slice(indexOf("{"))` skipped a leading prefix but
+// not a trailing suffix, so trailing text threw and silently dropped findings.
+test("extractJsonObject bounds both the prefix and the suffix", () => {
+  const obj = '{"runs":[{"results":[]}]}';
+  // trailing text after the object (the regression this fixes)
+  assert.equal(extractJsonObject(obj + "\nscan complete, 1 asset\n"), obj);
+  // leading log line before the object
+  assert.equal(extractJsonObject("→ loading policy\n" + obj), obj);
+  // both ends, plus nested braces
+  assert.equal(extractJsonObject("noise " + obj + " trailer"), obj);
+  // a brace inside a JSON string must not end the object early
+  const withBrace = '{"text":"} not the end {"}';
+  assert.equal(extractJsonObject(withBrace + " tail"), withBrace);
+  // the parsed result still feeds sarifFindings
+  assert.deepEqual(sarifFindings(JSON.parse(extractJsonObject(obj + " x"))), []);
+  // no object / unbalanced → null (caller returns [] → fail open)
+  assert.equal(extractJsonObject("no json here"), null);
+  assert.equal(extractJsonObject('{"a":1'), null);
 });

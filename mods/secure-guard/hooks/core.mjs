@@ -187,6 +187,32 @@ export function cnspecBundlesFor(kind, override, contentDir) {
   return names.map((n) => `${CNSPEC_CONTENT_RAW}/${n}.mql.yaml`);
 }
 
+// extractJsonObject returns the first complete top-level {…} object in s, or
+// null. It scans balanced braces, skipping any inside JSON strings, so a
+// scanner that writes a log/progress/summary line AROUND the JSON on stdout
+// (cnspec can) doesn't break the parse. The callers already skipped a leading
+// prefix with indexOf("{"); this also bounds the suffix, so trailing text no
+// longer makes JSON.parse throw and silently drop real findings (fail-open).
+export function extractJsonObject(s) {
+  const str = String(s ?? "");
+  const start = str.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < str.length; i++) {
+    const c = str[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return str.slice(start, i + 1);
+  }
+  return null; // unbalanced — no complete object
+}
+
 // sarifFindings extracts failed policy checks from a SARIF document. It drops
 // cnspec's `asset-error` results (the scan could not evaluate → stay quiet) and
 // keeps only FAILED checks (cnspec marks passes kind:"pass"/level:"none").

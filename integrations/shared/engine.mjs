@@ -23,6 +23,7 @@ import { join } from "node:path";
 import {
   normalizeVerdict, highConfidenceFindings, advisoryText,
   iacScanKind, cnspecScanArgs, cnspecBundlesFor, sarifFindings, iacAdvisoryText,
+  extractJsonObject,
 } from "../../mods/secure-guard/hooks/core.mjs";
 
 export const SCAN_TIMEOUT_MS = 20000;
@@ -101,8 +102,8 @@ function scanIac(run, env, kind, filePath, content) {
     writeFileSync(f, content);
     const bundles = cnspecBundlesFor(kind, env.CNSPEC_POLICY_BUNDLE || "", env.CNSPEC_CONTENT_DIR || "");
     const r = run("cnspec", cnspecScanArgs(kind, f, bundles), IAC_TIMEOUT_MS);
-    const s = (r.stdout || "").indexOf("{");
-    return r.available && s >= 0 ? sarifFindings(JSON.parse(r.stdout.slice(s))) : [];
+    const obj = r.available ? extractJsonObject(r.stdout) : null;
+    return obj ? sarifFindings(JSON.parse(obj)) : [];
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 

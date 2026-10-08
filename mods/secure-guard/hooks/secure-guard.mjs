@@ -51,6 +51,7 @@ import {
   parseVersion, meetsMin, normalizeVerdict,
   highConfidenceFindings, advisoryText, isScannable,
   iacScanKind, cnspecScanArgs, cnspecBundlesFor, sarifFindings, iacAdvisoryText,
+  extractJsonObject,
 } from "./core.mjs";
 
 const DOCS_URL = "https://mondoo.com/docs/xgrep/ai-agents/guard-hooks"; // what the guard does
@@ -409,11 +410,10 @@ async function reviewIac($, e, r, kind) {
 async function cnspecScan($, b, kind, file) {
   const bundles = cnspecBundlesFor(kind, $.env.get("CNSPEC_POLICY_BUNDLE") || "", $.env.get("CNSPEC_CONTENT_DIR") || "");
   const run = await $.process.run([...b.cmd, ...cnspecScanArgs(kind, file, bundles)], { timeoutMs: IAC_TIMEOUT_MS });
-  const out = (run.stdout ?? "");
-  const start = out.indexOf("{");
-  if (start < 0) return [];
+  const obj = extractJsonObject(run.stdout ?? "");
+  if (!obj) return [];
   let doc;
-  try { doc = JSON.parse(out.slice(start)); } catch { return []; }
+  try { doc = JSON.parse(obj); } catch { return []; }
   return sarifFindings(doc);
 }
 
