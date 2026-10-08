@@ -311,3 +311,11 @@ test("combineAdvisories joins both engines; one 'File written.' lead; null when 
   assert.equal(combineAdvisories([null, ""]), null);
   assert.equal(combineAdvisories(undefined), null);
 });
+
+test("advisoryText / iacAdvisoryText: pre-write wording says the file was not written", () => {
+  const code = advisoryText("db.py", [{ rule: "r", title: "T", line: 1, message: "m" }], { written: false });
+  assert.match(code, /^Not written: xgrep flagged 1 high-confidence security issue\(s\) in db\.py\. Fix them and write the file again:/);
+  const iac = iacAdvisoryText("main.tf", "terraform", [{ rule: "r", severity: "", message: "m" }], { written: false });
+  assert.match(iac, /^Not written: cnspec policy found 1 issue\(s\) in main\.tf \(terraform\)\. Fix them/);
+  assert.equal(combineAdvisories([iac, code]).match(/Not written/g).length, 1);
+});

@@ -32,6 +32,11 @@ const w = piGuard({ tool: "Write", input: { file_path: "db.py", content: "x" } }
 assert.ok(w && w.block === true, "vulnerable code write should block");
 assert.match(w!.reason, /SQL injection/);
 
+// an "ask" verdict blocks too (no prompt wired in Pi yet) — never a silent allow
+const askRun = () => ({ available: true, stdout: JSON.stringify({ decision: "ask", summary: "Reads ~/.ssh", findings: [{ title: "SSH key read" }] }) });
+const a = piGuard({ tool: "Bash", arguments: { command: "cat ~/.ssh/id_rsa" } }, { run: askRun, env: {} });
+assert.ok(a && a.block === true, "ask verdict should block in Pi");
+
 // unknown tool → allow
 assert.equal(piGuard({ tool: "Read", input: { file_path: "x" } }, { run: denyRun, env: {} }), undefined);
 

@@ -33,7 +33,9 @@ idempotent; delete the marked block to uninstall.
 - **node** on `PATH`.
 - **xgrep** on `PATH` (or `XGREP_PATH`), new enough for `guard --command` (≥ 0.78) —
   [xgrep.ai](https://xgrep.ai) / [docs](https://mondoo.com/docs/xgrep) / the
-  `@mondoohq/xgrep` npm package.
+  `@mondoohq/xgrep` npm package. If none new enough is installed, the hook fetches the pinned release from the
+  `@mondoohq/xgrep` npm package via `npx` (the scanner, not your data), says so on stderr,
+  and remembers it for later calls. Install it yourself to skip that: `npm i -g @mondoohq/xgrep`.
 - **cnspec** on `PATH` (or `CNSPEC_PATH`) for the IaC leg — optional.
 
 ## Decision contract
@@ -42,7 +44,7 @@ The hook reads the tool event as JSON on **stdin** and, when it denies, writes o
 JSON line to **stdout**:
 
 ```json
-{"decision":"deny","reason":"secure-guard: <summary>. Do not retry unless the user asks."}
+{"decision":"deny","reason":"secure-guard blocked this command before it ran. <xgrep's summary and fix>"}
 ```
 
 No output means **allow**.

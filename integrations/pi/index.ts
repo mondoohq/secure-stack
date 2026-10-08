@@ -35,7 +35,8 @@ export type PiBlock = { block: true; reason: string } | undefined;
 export function piGuard(call: PiCall, opts: Record<string, unknown> = {}): PiBlock {
   const ev = toEvent(call?.tool ?? call?.name, call?.arguments ?? call?.input ?? call?.params);
   const { decision, reason } = evaluate(ev, opts);
-  return decision === "deny" ? { block: true, reason: reason as string } : undefined;
+  // "ask" blocks too until a prompt is wired (see register()).
+  return decision === "allow" ? undefined : { block: true, reason: reason as string };
 }
 
 // The Pi extension entry point. Pi loads the default export and invokes the

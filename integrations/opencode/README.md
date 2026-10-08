@@ -35,6 +35,9 @@ to allow it. opencode surfaces the thrown message to the agent.
 - **node** on `PATH`.
 - **xgrep** with `guard --command` (≥ 0.78) on `PATH` or via `XGREP_PATH` —
   [xgrep.ai](https://xgrep.ai) / [docs](https://mondoo.com/docs/xgrep) / `@mondoohq/xgrep` on npm.
+  If none new enough is installed, the adapter fetches the pinned release from the
+  `@mondoohq/xgrep` npm package via `npx` (the scanner, not your data), says so on stderr,
+  and reuses it for the session. Install it yourself to skip that: `npm i -g @mondoohq/xgrep`.
 - **cnspec** on `PATH` or via `CNSPEC_PATH` for the IaC leg (optional).
 
 ## Testing

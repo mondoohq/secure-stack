@@ -59,7 +59,7 @@ const INTEGRATIONS: Integration[] = [
     dir: "integrations/codex",
     entry: "install.mjs",
     install: "`node integrations/codex/install.mjs`",
-    posture: "shell + code + IaC block (pre-write)",
+    posture: "shell block or ask; code + IaC block (pre-write)",
   },
   {
     agent: "Mistral Vibe",

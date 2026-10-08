@@ -49,16 +49,18 @@ function resolveCnspec() {
 
 const xgrep = resolveXgrep();
 const cnspec = resolveCnspec();
-// The hook resolves a single binary from XGREP_PATH; the npx fallback can't be an
-// XGREP_PATH, so require a real binary to exercise the child here.
+// A local binary is handed to the hook as XGREP_PATH. When only the npx release
+// works, the hook is left to find it itself — exercising the engine's own
+// pinned-npx fallback, as a user without a current xgrep would.
 const xgrepPath = xgrep.length === 1 ? xgrep[0] : null;
-if (!xgrepPath) { console.error("ERROR: this scenario needs a real xgrep binary (set XGREP_PATH)."); process.exit(2); }
 
 // ─── Drive the hook as an agent would ─────────────────────────────────────────
 function runHook(agent, event) {
-  const env = { ...process.env, XGREP_PATH: xgrepPath };
+  const env = { ...process.env };
+  if (xgrepPath) env.XGREP_PATH = xgrepPath;
+  else delete env.XGREP_PATH;
   if (cnspec && cnspec.length === 1) env.CNSPEC_PATH = cnspec[0];
-  const r = spawnSync("node", [HOOK, "--agent", agent], { input: JSON.stringify(event), encoding: "utf8", env, timeout: 60000 });
+  const r = spawnSync("node", [HOOK, "--agent", agent], { input: JSON.stringify(event), encoding: "utf8", env, timeout: 180000 });
   const line = (r.stdout ?? "").trim();
   return line ? JSON.parse(line) : null; // null = allow
 }
@@ -69,7 +71,7 @@ const check = (name, ok, detail) => {
   if (!ok) failures++;
 };
 
-console.log(`\nhook: node ${HOOK}\nxgrep: ${xgrepPath}\ncnspec: ${cnspec ? cnspec.join(" ") : "(not installed — IaC leg skipped)"}\n`);
+console.log(`\nhook: node ${HOOK}\nxgrep: ${xgrepPath ?? `(hook's own fallback: ${xgrep.join(" ")})`}\ncnspec: ${cnspec ? cnspec.join(" ") : "(not installed — IaC leg skipped)"}\n`);
 
 const vuln = `from flask import request
 import sqlite3
@@ -109,6 +111,7 @@ for (const agent of ["codex", "mistral"]) {
   const vw = runHook(agent, { tool_name: "Write", tool_input: { file_path: "db.py", content: vuln } });
   console.log(`  write(vuln code) → ${vw ? vw.decision + ": " + vw.reason.split("\n")[0] : "allow"}`);
   check(`${agent}: vulnerable code write is blocked`, vw?.decision === blockKey, `decision=${vw?.decision ?? "allow"}`);
+  check(`${agent}: the block says the file was not written`, /^Not written:/.test(vw?.reason ?? ""), (vw?.reason ?? "").split("\n")[0]);
 
   const sw = runHook(agent, { tool_name: "Write", tool_input: { file_path: "safe.py", content: safe } });
   console.log(`  write(safe code) → ${sw ? JSON.stringify(sw) : "allow"}`);

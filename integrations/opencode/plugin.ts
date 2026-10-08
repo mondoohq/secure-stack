@@ -33,7 +33,8 @@ export interface OpencodeToolEvent {
 export function opencodeGuard(evt: OpencodeToolEvent, opts: Record<string, unknown> = {}): void {
   const ev = toEvent(evt?.tool, evt?.args ?? evt?.input);
   const { decision, reason } = evaluate(ev, opts);
-  if (decision === "deny") throw new Error(reason as string);
+  // opencode has no native "ask": an "ask" verdict denies, like "deny".
+  if (decision !== "allow") throw new Error(reason as string);
 }
 
 // The opencode plugin entry point: an async factory returning the hooks object.

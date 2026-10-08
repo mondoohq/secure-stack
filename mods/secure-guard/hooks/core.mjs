@@ -116,9 +116,16 @@ export function highConfidenceFindings(doc) {
     }));
 }
 
-export function advisoryText(file, findings) {
-  const head = `File written. xgrep flagged ${findings.length} high-confidence security ` +
-    `issue(s) in ${file} that you should fix before continuing:`;
+// advisoryText phrases xgrep code findings for the agent. `written` says which
+// side of the write the adapter runs on: the Claude mod reviews after the file
+// landed (advisory); the pre-write adapters block it, so the agent must fix the
+// content and write it again — "File written." would tell it the opposite.
+export function advisoryText(file, findings, { written = true } = {}) {
+  const head = written
+    ? `File written. xgrep flagged ${findings.length} high-confidence security ` +
+      `issue(s) in ${file} that you should fix before continuing:`
+    : `Not written: xgrep flagged ${findings.length} high-confidence security ` +
+      `issue(s) in ${file}. Fix them and write the file again:`;
   const shown = findings.slice(0, REVIEW_MAX_SHOWN);
   const body = shown
     .map((f) => `  • ${f.title} (${f.rule}), line ${f.line}: ${f.message}`)
@@ -327,16 +334,20 @@ export function sarifFindings(doc) {
 }
 
 // combineAdvisories joins the advisories from both engines into one tool result
-// (null when there are none). Only the first keeps the "File written." lead.
+// (null when there are none). Only the first keeps its "File written." /
+// "Not written:" lead.
 export function combineAdvisories(texts) {
   const parts = (Array.isArray(texts) ? texts : []).filter((t) => typeof t === "string" && t !== "");
   if (parts.length === 0) return null;
-  return parts.map((t, i) => (i === 0 ? t : t.replace(/^File written\. /, ""))).join("\n\n");
+  return parts.map((t, i) => (i === 0 ? t : t.replace(/^(?:File written\.|Not written:) /, ""))).join("\n\n");
 }
 
-export function iacAdvisoryText(file, kind, findings) {
-  const head = `File written. cnspec policy found ${findings.length} issue(s) in ${file} ` +
-    `(${kind}) to fix before continuing:`;
+export function iacAdvisoryText(file, kind, findings, { written = true } = {}) {
+  const head = written
+    ? `File written. cnspec policy found ${findings.length} issue(s) in ${file} ` +
+      `(${kind}) to fix before continuing:`
+    : `Not written: cnspec policy found ${findings.length} issue(s) in ${file} ` +
+      `(${kind}). Fix them and write the file again:`;
   const shown = findings.slice(0, REVIEW_MAX_SHOWN);
   const body = shown
     .map((f) => `  • ${f.severity ? `[${f.severity}] ` : ""}${f.message} (${f.rule})`)
