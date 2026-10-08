@@ -156,6 +156,10 @@ engine before it lands: **xgrep** for secrets/PII + dangerous commands (shell) a
 CloudFormation). The routing and finding logic lives once in a shared core/engine; each agent
 gets a thin adapter under [`integrations/`](integrations/).
 
+Every scan runs on your machine: commands and code are never uploaded, and the only downloads
+are the scanner and public policies, each announced when it happens
+([details](mods/secure-guard/README.md#local-by-design)).
+
 <!-- BEGIN_INTEGRATIONS_TABLE -->
 | Agent | Shape | Install | Posture |
 |-------|-------|---------|---------|

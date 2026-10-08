@@ -70,6 +70,10 @@ Always run `./scripts/publish.sh --check` before opening a PR — it is the CI g
   preserve that in any adapter change.
 - Don't commit secrets or real credentials, and don't add a scanner invocation that sends code
   off the machine. xgrep/cnspec run locally.
+- Anything that crosses the network is **announced** and documented in the mod README's "Local
+  by design" table: the xgrep binary fetch and cnspec policy downloads come *down* only, and
+  sending anything *up* (e.g. Mondoo Platform reporting) is opt-in. Keep it that way, and keep
+  that table in sync when you add one.
 
 ## PR guidelines
 
