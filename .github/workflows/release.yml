@@ -8,6 +8,14 @@ name: Release
 # Trigger is the version *content*, not the commit message: the squash title is
 # editable in the merge dialog, so a maintainer tidying "chore: release v1.1.0"
 # into something else would silently disable releasing, with nothing to notice.
+# So a `gate` job reads the version from plugin.json and decides; `release` and
+# the optional Slack `notify-*` jobs key off its output and only run for a real
+# version bump.
+#
+# The Slack notification is OPTIONAL and fail-safe: notify-start / notify-final
+# run only when the `SLACK_RELEASE_CHANNEL_ID` repo variable is set (with the
+# `SLACK_BOT_TOKEN` secret), are `continue-on-error`, and a Slack hiccup never
+# fails or blocks the release itself.
 #
 # NOTE: the tag and Release are created with GITHUB_TOKEN, and GitHub suppresses
 # workflow triggers for events it creates. Any future `on: release` or
@@ -20,7 +28,7 @@ on:
     paths: [".claude-plugin/plugin.json"]
 
 permissions:
-  contents: write # create the tag and the GitHub Release
+  contents: read
 
 concurrency:
   group: release
@@ -28,8 +36,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  gate:
+    name: Decide whether this push is a release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.gate.outputs.release }}
+      version: ${{ steps.gate.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,11 +83,54 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release=true" >> "$GITHUB_OUTPUT"
 
+  # Optional: post a "release started" Slack message with the stage pending.
+  # Runs only when the Slack channel variable is configured, and never blocks
+  # the release (continue-on-error).
+  notify-start:
+    name: Notify release start
+    needs: gate
+    if: ${{ needs.gate.outputs.release == 'true' && vars.SLACK_RELEASE_CHANNEL_ID != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    outputs:
+      channel: ${{ steps.post.outputs.channel_id }}
+      ts: ${{ steps.post.outputs.ts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build Slack message
+        run: node scripts/slack-release-message.mjs start > "$RUNNER_TEMP/slack.json"
+        env:
+          SLACK_CHANNEL: ${{ vars.SLACK_RELEASE_CHANNEL_ID }}
+          RELEASE_VERSION: v${{ needs.gate.outputs.version }}
+      - name: Post Slack message
+        id: post
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload-file-path: ${{ runner.temp }}/slack.json
+
+  release:
+    name: Tag and publish the GitHub Release
+    needs: gate
+    if: ${{ needs.gate.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag and the GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Guard against a duplicate or mismatched tag
         id: tagguard
-        if: steps.gate.outputs.release == 'true'
         env:
-          VERSION: ${{ steps.gate.outputs.version }}
+          VERSION: ${{ needs.gate.outputs.version }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
@@ -94,9 +151,9 @@ jobs:
           fi
 
       - name: Extract release notes
-        if: steps.gate.outputs.release == 'true' && steps.tagguard.outputs.skip != 'true'
+        if: steps.tagguard.outputs.skip != 'true'
         env:
-          VERSION: ${{ steps.gate.outputs.version }}
+          VERSION: ${{ needs.gate.outputs.version }}
         run: |
           set -euo pipefail
           # The changelog is what the reviewer approved, so the Release page and
@@ -116,10 +173,10 @@ jobs:
           cat release-notes.md
 
       - name: Create the tag and the GitHub Release
-        if: steps.gate.outputs.release == 'true' && steps.tagguard.outputs.skip != 'true'
+        if: steps.tagguard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.gate.outputs.version }}
+          VERSION: ${{ needs.gate.outputs.version }}
         run: |
           set -euo pipefail
           # `gh release create` mints the tag at --target, so no tag push — and
@@ -134,3 +191,34 @@ jobs:
           case "$VERSION" in *-*) args+=(--prerelease) ;; esac
           gh release create "v${VERSION}" "${args[@]}"
           echo "Published v${VERSION}: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${VERSION}"
+
+  # Optional: update the "release started" message in place with the result.
+  # Runs whenever notify-start actually posted (its ts is set), success or not.
+  notify-final:
+    name: Notify release result
+    needs: [gate, notify-start, release]
+    if: ${{ always() && needs.notify-start.outputs.ts != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build Slack message
+        run: node scripts/slack-release-message.mjs final > "$RUNNER_TEMP/slack.json"
+        env:
+          SLACK_CHANNEL: ${{ needs.notify-start.outputs.channel }}
+          SLACK_TS: ${{ needs.notify-start.outputs.ts }}
+          SLACK_ALERT_GROUP: ${{ vars.SLACK_RELEASE_ALERT_GROUP_ID }}
+          RELEASE_VERSION: v${{ needs.gate.outputs.version }}
+          RESULT_RELEASE: ${{ needs.release.result }}
+      - name: Update Slack message
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
+        with:
+          method: chat.update
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload-file-path: ${{ runner.temp }}/slack.json
