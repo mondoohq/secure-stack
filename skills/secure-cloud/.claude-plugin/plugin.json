@@ -1,6 +1,6 @@
 {
   "name": "secure-cloud",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Audit cloud account security posture — scan AWS, Azure, GCP, and Kubernetes against CIS foundations and Mondoo cloud policies with cnspec",
   "author": {
     "name": "Mondoo"

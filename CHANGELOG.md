@@ -1,3 +1,12 @@
+## v2.0.0 - 2026-10-08
+
+- docs(readme): move the MQL-skill note from the top to its own section near the end (#22)
+- ci(release): optional Slack release notification (ported from skillcheck) (#21)
+- fix(secure-guard): unify cnspec JSON parsing behind a never-throwing parseJsonObject (#20)
+- Secure your stack with AI agents: restructure the hub (secure-stack) (#19)
+- docs: point agents at xgrep guard and say what to do when it blocks (#18)
+
+
 # Changelog
 
 ## v1.0.1 - 2026-09-07

@@ -1,6 +1,6 @@
 {
   "name": "secure-saas",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Audit SaaS and identity-provider security posture — scan GitHub, GitLab, Okta, Google Workspace, Microsoft 365, Slack, Atlassian, and Snowflake with cnspec",
   "author": {
     "name": "Mondoo"
