@@ -167,7 +167,7 @@ function scanIac(run, env, kind, filePath, content) {
 }
 
 // These adapters run BEFORE the tool: a blocked write never landed.
-const PRE_WRITE = { written: false };
+const PRE_WRITE = Object.freeze({ written: false });
 
 // shellReason phrases a blocked shell command. xgrep's summary already says how
 // to fix it (e.g. "remove the secret and retry"), so the reason adds only that
