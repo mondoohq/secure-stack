@@ -7,7 +7,8 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
   you answer. xgrep here **prevents secrets and PII from leaving** via a prompt or tool call,
   and blocks dangerous commands.
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
-  high-confidence findings back as the tool result so the agent fixes them in the same turn.
+  high-confidence findings back right after the tool result so the agent fixes them in the
+  same turn.
   xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the code.
 - **IaC policy guard (cnspec)** — after the agent writes Terraform, a Dockerfile, or a
   Kubernetes / CloudFormation manifest, runs cnspec policy checks and hands violations back
@@ -75,6 +76,7 @@ unit-tested; an end-to-end scenario drives the engines against the real binaries
 
 ```bash
 node --test hooks/*.test.mjs                 # unit tests (no binaries needed)
+claude plugin test .                         # hook-level tests, run by Claude Code itself
 node test/pipeline-scenario.mjs              # end-to-end (XGREP_PATH / CNSPEC_PATH to skip the download)
 ```
 
