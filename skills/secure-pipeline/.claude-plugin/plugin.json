@@ -1,6 +1,6 @@
 {
   "name": "secure-pipeline",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Verify and enforce security before code ships - scan code with xgrep (SAST/SCA/secrets) and IaC/config with cnspec, then triage and fix, mapped to OWASP Top 10:2025 and the OWASP Top 10 for LLM & GenAI 2025",
   "author": {
     "name": "Mondoo"

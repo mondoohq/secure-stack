@@ -1,6 +1,6 @@
 {
   "name": "understand-code",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Understand an unfamiliar codebase before you change it — map structure, find definitions/callers, trace call chains, and assess a change's blast radius with xgrep's AST code graph",
   "author": {
     "name": "Mondoo"
