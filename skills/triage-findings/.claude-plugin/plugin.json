@@ -1,6 +1,6 @@
 {
   "name": "triage-findings",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Decide whether a security finding is real — classify xgrep scan results as true or false positives by tracing dataflow and call chains with the code graph",
   "author": {
     "name": "Mondoo"

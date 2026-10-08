@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.1 - 2026-10-08
+
+- fix(release): give the release job contents:write via the top-level permissions (#25)
+
+
 ## v2.0.0 - 2026-10-08
 
 Renames the hub to **secure-stack** and reorganizes it around outcomes — two
