@@ -51,8 +51,11 @@ call — a guard must never wedge the session.
 - **node** on `PATH`.
 - **xgrep** with `guard --command` (≥ 0.78) on `PATH` or via `XGREP_PATH` —
   [xgrep.ai](https://xgrep.ai) / [docs](https://mondoo.com/docs/xgrep) / `@mondoohq/xgrep` on npm.
-- **cnspec** on `PATH` or via `CNSPEC_PATH` for the IaC leg (optional; see the mod README for
-  policy-bundle options via `CNSPEC_POLICY_BUNDLE` / `CNSPEC_CONTENT_DIR`).
+- **cnspec** on `PATH` or via `CNSPEC_PATH` for the IaC leg (optional). By default it runs the
+  latest public policy bundles, downloaded when it scans: only policies come down, and the file
+  is assessed locally with nothing uploaded. See the
+  [mod README](../mods/secure-guard/README.md#where-the-iac-policies-come-from) for the other
+  sources (`CNSPEC_POLICY_BUNDLE`, offline `CNSPEC_CONTENT_DIR`, opt-in `CNSPEC_USE_PLATFORM`).
 
 ## Testing
 

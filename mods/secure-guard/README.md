@@ -8,11 +8,12 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
   and blocks dangerous commands.
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
   high-confidence findings back right after the tool result so the agent fixes them in the
-  same turn.
-  xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the code.
-- **IaC policy guard (cnspec)** — after the agent writes Terraform, a Dockerfile, or a
-  Kubernetes / CloudFormation manifest, runs cnspec policy checks and hands violations back
-  the same way.
+  same turn. xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the
+  code.
+- **IaC policy guard (cnspec)** — after the agent writes or edits Terraform, a Dockerfile, or
+  a Kubernetes / CloudFormation manifest, runs cnspec policy checks and hands violations back
+  the same way. Terraform and Dockerfiles get the xgrep review too, so a hard-coded secret in
+  `main.tf` is still caught.
 
 So xgrep runs in two complementary modes — **prevent secrets/PII leaving** (guard) and
 **enforce the OWASP Top 10 on code** (scan) — and cnspec adds IaC policy. This single routing
@@ -47,22 +48,28 @@ The mod loads in your next session. Run `/secure-guard` to check it is reaching 
 - **cnspec** (IaC policy) — must be [installed](https://mondoo.com/docs/cnspec/install)
   (`CNSPEC_PATH` or `cnspec` on `PATH`). If it isn't, the IaC guard stays silently off.
 
-### cnspec needs a policy source
+### Where the IaC policies come from
 
-cnspec runs the policies assigned by a logged-in Mondoo Platform, **or** a local/URL policy
-bundle. To use bundles without an account, point the guard at one:
+The IaC guard works with no configuration. By default it runs the latest public
+[cnspec policy bundles](https://github.com/mondoohq/cnspec/tree/main/content) that match the
+file (Terraform: AWS/Azure/GCP security; Dockerfile and Kubernetes: security and best
+practices; CloudFormation: AWS security). cnspec downloads them from GitHub when it scans.
 
-```bash
-# a local bundle, an s3:// URI, or a public https:// URL (e.g. a cnspec content bundle)
-export CNSPEC_POLICY_BUNDLE=/path/to/policy.mql.yaml
-```
+**Only policies come down. Your files never go up.** cnspec evaluates the file on your machine,
+runs `--incognito`, and reports results to nowhere but the agent. The first download in a
+session is announced with a toast and a transcript line, so it is never silent.
 
-Pick a bundle whose policy **filters match the IaC platform** you're scanning
-(`terraform-hcl`, `dockerfile`, `k8s`, `cloudformation`). With no policy source, cnspec
-reports "no policies" and the IaC guard stays quiet.
+Other policy sources, in precedence order:
 
-> Status: the per-IaC-type default bundle mapping (so the IaC guard works out of the box with
-> no configuration) is being finalized; today set `CNSPEC_POLICY_BUNDLE` or log in to Mondoo.
+| Set | Policies | Network |
+|-----|----------|---------|
+| `CNSPEC_POLICY_BUNDLE` | your bundle(s): comma-separated local paths, `https://` or `s3://` URLs | only if a URL |
+| `CNSPEC_CONTENT_DIR` | the same public bundles, from a local [cnspec](https://github.com/mondoohq/cnspec) `content/` checkout | **none, fully offline** |
+| `CNSPEC_USE_PLATFORM=1` | the policies assigned in your logged-in Mondoo Platform space | cnspec **reports the scan results to your space** (opt-in for that reason) |
+| *(nothing)* | the latest public bundles | policies download; nothing is uploaded |
+
+A custom bundle needs policy **filters that match the IaC platform** you're scanning
+(`terraform-hcl`, `dockerfile`, `k8s`, `cloudformation`), or cnspec has nothing to run.
 
 ## Status in a session
 

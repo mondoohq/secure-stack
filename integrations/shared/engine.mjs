@@ -9,7 +9,8 @@
 // Routing (same as the Claude mod):
 //   Bash  → `xgrep guard --command <cmd>`           (secrets/PII + dangerous command)
 //   Write → `xgrep scan` the proposed code          (OWASP Top 10 / SAST / secrets)
-//         → OR `cnspec scan` the proposed IaC        (Terraform/Dockerfile/K8s/CFN)
+//         → OR `cnspec scan` the proposed IaC        (Terraform/Dockerfile/K8s/CFN),
+//            plus `xgrep scan` for Terraform/Dockerfiles (hard-coded secrets)
 //
 // A finding → { decision: "deny", reason }, else { decision: "allow" }. The
 // scanners run through an injectable `run` (which, args) => { available, stdout }
@@ -21,15 +22,14 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  normalizeVerdict, highConfidenceFindings, advisoryText,
-  iacScanKind, cnspecScanArgs, cnspecBundlesFor, sarifFindings, iacAdvisoryText,
-  parseJsonObject,
+  normalizeVerdict, highConfidenceFindings, advisoryText, isScannable,
+  iacScanKind, alsoCodeScan, combineAdvisories,
+  cnspecScanArgs, cnspecPolicySource, sarifFindings, iacAdvisoryText,
+  parseJsonObject, IAC_TIMEOUT_MS,
 } from "../../mods/secure-guard/hooks/core.mjs";
 
 export const SCAN_TIMEOUT_MS = 20000;
-// cnspec loads several bundles and compiles MQL; a real IaC scan is ~20–30s, so
-// the budget is generous — a timeout fails open, which must not hit a slow scan.
-export const IAC_TIMEOUT_MS = 90000;
+export { IAC_TIMEOUT_MS }; // shared with the Claude mod, defined in core
 
 const allow = () => ({ decision: "allow" });
 const deny = (reason) => ({ decision: "deny", reason });
@@ -100,11 +100,16 @@ function scanIac(run, env, kind, filePath, content) {
     const name = kind === "docker" ? "Dockerfile" : (filePath.split(/[\\/]/).pop() || "main.tf");
     const f = join(dir, name);
     writeFileSync(f, content);
-    const bundles = cnspecBundlesFor(kind, env.CNSPEC_POLICY_BUNDLE || "", env.CNSPEC_CONTENT_DIR || "");
-    const r = run("cnspec", cnspecScanArgs(kind, f, bundles), IAC_TIMEOUT_MS);
+    const source = cnspecPolicySource(kind, env);
+    const args = cnspecScanArgs(kind, f, source.bundles, { platform: source.kind === "platform" });
+    const r = run("cnspec", args, IAC_TIMEOUT_MS);
     const doc = r.available ? parseJsonObject(r.stdout) : null;
     return doc ? sarifFindings(doc) : [];
   } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+function safely(scan) {
+  try { return scan(); } catch { return []; }
 }
 
 // evaluate: neutral event → { decision: "allow" | "deny", reason? }.
@@ -128,8 +133,16 @@ export function evaluate(ev, opts = {}) {
     if (ev.tool === "Write" && ev.filePath && typeof ev.content === "string") {
       const kind = iacScanKind(ev.filePath, ev.content);
       if (kind) {
-        const f = scanIac(run, env, kind, ev.filePath, ev.content);
-        return f.length ? deny(iacAdvisoryText(ev.filePath, kind, f)) : allow();
+        // Each engine fails open on its own: one erroring never hides the other.
+        const iac = safely(() => scanIac(run, env, kind, ev.filePath, ev.content));
+        const code = alsoCodeScan(kind) && isScannable(ev.filePath)
+          ? safely(() => scanCode(run, ev.filePath, ev.content))
+          : [];
+        const text = combineAdvisories([
+          iac.length ? iacAdvisoryText(ev.filePath, kind, iac) : null,
+          code.length ? advisoryText(ev.filePath, code) : null,
+        ]);
+        return text ? deny(text) : allow();
       }
       const f = scanCode(run, ev.filePath, ev.content);
       return f.length ? deny(advisoryText(ev.filePath, f)) : allow();

@@ -107,3 +107,48 @@ test("CNSPEC_POLICY_BUNDLE reaches cnspec as the bundle path", async ($, on) => 
   expect(scan).toContain("/p/policy.mql.yaml");
   expect(scan.some((a) => a.includes("[object Promise]"))).toBe(false);
 });
+
+test("Edit on a K8s manifest reads the file, classifies it, and runs cnspec", async ($, on) => {
+  const runs = fakeEngine(on, { files: { "/w/deploy.yaml": K8S }, cnspec: CNSPEC_FAIL });
+  const r = await $.tool.call({ tool: "Edit", file_path: "/w/deploy.yaml", old_string: "a", new_string: "b" } as any);
+  expect(advisories(r)).toContain("Container runs privileged");
+  expect(runs.some((a) => a[0] === "cnspec" && a.includes("k8s"))).toBe(true);
+});
+
+test("Edit on plain YAML that is not IaC stays quiet", async ($, on) => {
+  const runs = fakeEngine(on, { files: { "/w/config.yaml": "name: x\n" }, cnspec: CNSPEC_FAIL });
+  const r = await $.tool.call({ tool: "Edit", file_path: "/w/config.yaml", old_string: "a", new_string: "b" } as any);
+  expect(advisories(r)).toBe("");
+  expect(runs.some((a) => a[0] === "cnspec" && a[1] === "scan")).toBe(false);
+});
+
+test("Terraform gets both engines: cnspec policy and the xgrep secret scan", async ($, on) => {
+  const runs = fakeEngine(on, { scan: XGREP_SECRET, cnspec: CNSPEC_FAIL });
+  const r = await $.tool.call({ tool: "Write", file_path: "/w/main.tf", content: "resource \"x\" \"y\" {}\n" } as any);
+  const text = advisories(r);
+  expect(text).toContain("Container runs privileged"); // cnspec leg
+  expect(text).toContain("Hard-coded AWS access key"); // xgrep leg
+  expect(runs.some((a) => a.includes("scan") && a.includes("/w/main.tf") && a[0] !== "cnspec")).toBe(true);
+});
+
+test("Dockerfile secret is still reported when cnspec is not installed", async ($, on) => {
+  fakeEngine(on, { scan: XGREP_SECRET }); // no cnspec
+  const r = await $.tool.call({ tool: "Write", file_path: "/w/Dockerfile", content: "FROM alpine\n" } as any);
+  expect(advisories(r)).toContain("Hard-coded AWS access key");
+});
+
+test("CNSPEC_USE_PLATFORM runs the space's policies: no bundles, no --incognito", async ($, on) => {
+  const runs = fakeEngine(on, { env: { CNSPEC_USE_PLATFORM: "1" }, cnspec: CNSPEC_FAIL });
+  await $.tool.call({ tool: "Write", file_path: "/w/main.tf", content: "x\n" } as any);
+  const scan = runs.find((a) => a[0] === "cnspec" && a[1] === "scan")!;
+  expect(scan.includes("--incognito")).toBe(false);
+  expect(scan.includes("-f")).toBe(false);
+});
+
+test("by default cnspec runs incognito against the public bundles", async ($, on) => {
+  const runs = fakeEngine(on, { cnspec: CNSPEC_FAIL });
+  await $.tool.call({ tool: "Write", file_path: "/w/main.tf", content: "x\n" } as any);
+  const scan = runs.find((a) => a[0] === "cnspec" && a[1] === "scan")!;
+  expect(scan.includes("--incognito")).toBe(true);
+  expect(scan.some((a) => a.startsWith("https://raw.githubusercontent.com/mondoohq/cnspec/"))).toBe(true);
+});
