@@ -27,8 +27,13 @@ on:
     branches: [main]
     paths: [".claude-plugin/plugin.json"]
 
+# The default for all jobs is read; the `release` job inherits this write so it
+# can create the tag + GitHub Release. (A job-level `contents: write` on top of a
+# top-level `contents: read` baseline did NOT grant write here — the release 403'd
+# on POST /releases — so the write lives at the top level, as it did through
+# v1.0.1, and the notify/gate jobs drop back to read below.)
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release
@@ -121,8 +126,8 @@ jobs:
     needs: gate
     if: ${{ needs.gate.outputs.release == 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the tag and the GitHub Release
+    # No job-level permissions: inherit the top-level `contents: write` so the
+    # release can be created (see the note on the top-level permissions block).
     steps:
       - name: Checkout
         uses: actions/checkout@v4
