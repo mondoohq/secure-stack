@@ -65,14 +65,38 @@ test("Write clean code → allow", () => {
   assert.equal(evaluate({ tool: "Write", filePath: "ok.py", content: "x = 1\n" }, { run, env: {} }).decision, "allow");
 });
 
-test("Write Terraform → deny, routed to cnspec (not xgrep)", () => {
-  const { run, calls } = faker({ cnspec: SARIF_FAIL });
+test("Write Terraform → deny, routed to cnspec AND xgrep (secrets)", () => {
+  const { run, calls } = faker({ cnspec: SARIF_FAIL, xgrep: SCAN_VULN });
   const r = evaluate({ tool: "Write", filePath: "main.tf", content: 'resource "aws_security_group" "x" {}\n' }, { run, env: {} });
   assert.equal(r.decision, "deny");
   assert.match(r.reason, /Security group open/);
+  assert.match(r.reason, /SQL injection/); // the xgrep leg's finding rides along
   assert.equal(calls[0].which, "cnspec");
   assert.ok(calls[0].args.includes("terraform"));
   assert.ok(calls[0].args.includes("--incognito"));
+  assert.ok(calls.some((c) => c.which === "xgrep" && c.args[0] === "scan"));
+});
+
+test("Write Dockerfile with cnspec missing → xgrep finding still denies", () => {
+  const { run } = faker({ xgrep: SCAN_VULN }); // no cnspec
+  const r = evaluate({ tool: "Write", filePath: "Dockerfile", content: "FROM alpine\n" }, { run, env: {} });
+  assert.equal(r.decision, "deny");
+  assert.match(r.reason, /SQL injection/);
+});
+
+test("Write k8s manifest → cnspec only, xgrep not called", () => {
+  const { run, calls } = faker({ cnspec: SARIF_FAIL, xgrep: SCAN_VULN });
+  const k8s = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: x\n";
+  evaluate({ tool: "Write", filePath: "pod.yaml", content: k8s }, { run, env: {} });
+  assert.ok(calls.every((c) => c.which === "cnspec"));
+});
+
+test("CNSPEC_USE_PLATFORM → cnspec runs without bundles or --incognito", () => {
+  const { run, calls } = faker({ cnspec: SARIF_FAIL });
+  evaluate({ tool: "Write", filePath: "main.tf", content: "x\n" }, { run, env: { CNSPEC_USE_PLATFORM: "1" } });
+  const scan = calls.find((c) => c.which === "cnspec");
+  assert.ok(!scan.args.includes("--incognito"));
+  assert.ok(!scan.args.includes("-f"));
 });
 
 test("Write k8s manifest (by content) → routed to cnspec terraform? no — k8s", () => {

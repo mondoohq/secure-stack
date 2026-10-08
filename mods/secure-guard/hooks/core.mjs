@@ -16,7 +16,10 @@
 //            parsed by normalizeVerdict) AND OWASP Top 10 code review (via
 //            `xgrep scan --json`, filtered by highConfidenceFindings).
 //   cnspec — IaC policy checks (via `cnspec scan … -o sarif`, parsed by
-//            sarifFindings), with the bundle mapping in cnspecBundlesFor.
+//            sarifFindings), with the policy source chosen by cnspecPolicySource.
+//
+// Terraform and Dockerfiles go to BOTH engines: cnspec for policy, xgrep for the
+// secrets and code issues cnspec doesn't look for (a hard-coded key in main.tf).
 
 // ─── Shared constants ────────────────────────────────────────────────────────
 
@@ -27,6 +30,15 @@ export const XGREP_PIN = "0.80.0";
 export const XGREP_MIN = "0.78.0";
 
 export const CNSPEC_INSTALL_URL = "https://mondoo.com/docs/cnspec/install";
+
+// A cnspec IaC scan loads several bundles and compiles MQL — a real one takes
+// ~20–30s — so the budget is generous: a timeout fails open, silently, and must
+// not hit an ordinary slow scan. Shared by the mod and every adapter.
+export const IAC_TIMEOUT_MS = 90000;
+
+// IaC kinds that also get the xgrep code scan. Terraform and Dockerfiles are
+// where secrets get hard-coded; K8s/CFN YAML is left to cnspec alone.
+const IAC_ALSO_CODE = new Set(["terraform", "docker"]);
 
 // cnspec runs a policy only when one of its filters matches the IaC asset. The
 // public content bundles are platform/provider scoped, so the guard loads a set
@@ -153,6 +165,20 @@ export function iacScanKind(file, content) {
   return null;
 }
 
+// alsoCodeScan reports whether an IaC kind also gets the xgrep code scan.
+export function alsoCodeScan(kind) {
+  return IAC_ALSO_CODE.has(kind);
+}
+
+// iacNeedsContent reports whether iacScanKind can only classify this path from
+// its content (YAML/JSON could be K8s, CloudFormation, or neither). An adapter
+// whose event carries no full content (Edit/MultiEdit) reads the file for these.
+export function iacNeedsContent(file) {
+  const base = (String(file ?? "").split(/[\\/]/).pop() ?? "").toLowerCase();
+  if (base.endsWith(".tf.json")) return false; // terraform by path
+  return base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".json");
+}
+
 // classifyYaml tells a Kubernetes manifest from a CloudFormation template by
 // content; null when it is neither (or content is unavailable).
 export function classifyYaml(content) {
@@ -164,12 +190,64 @@ export function classifyYaml(content) {
 
 // cnspecScanArgs builds the `cnspec scan …` argv for one IaC file. The docker
 // provider scans a Dockerfile as `scan docker file <path>`; the others take the
-// path directly. --incognito keeps the scan local and skips loading the Mondoo
-// Platform config, so a broken/absent credential never breaks the IaC guard.
-export function cnspecScanArgs(kind, file, bundles) {
+// path directly.
+//
+// By default the scan runs --incognito against the given bundles: cnspec
+// evaluates the file on this machine, reports nothing anywhere, and skips the
+// Mondoo Platform config so a broken/absent credential never breaks the guard.
+// With { platform: true } it instead runs the policies assigned in the user's
+// logged-in Mondoo Platform space (no -f, no --incognito); cnspec then reports
+// the scan's results to that space — which is why it is opt-in.
+export function cnspecScanArgs(kind, file, bundles, opts = {}) {
   const target = kind === "docker" ? ["docker", "file", file] : [kind, file];
+  if (opts.platform) return ["scan", ...target, "-o", "sarif"];
   const policy = (Array.isArray(bundles) ? bundles : []).flatMap((b) => ["-f", b]);
   return ["scan", ...target, ...policy, "--incognito", "-o", "sarif"];
+}
+
+// cnspecPolicySource decides where the IaC policies come from, from the
+// adapter's environment ({ CNSPEC_POLICY_BUNDLE, CNSPEC_CONTENT_DIR,
+// CNSPEC_USE_PLATFORM }), in precedence:
+//   1. CNSPEC_POLICY_BUNDLE — explicit bundle(s), incognito
+//   2. CNSPEC_CONTENT_DIR   — a local cnspec content checkout, incognito, offline
+//   3. CNSPEC_USE_PLATFORM  — the logged-in Mondoo Platform space's policies
+//   4. the latest public bundles, downloaded from GitHub, incognito
+// Returns { kind: "bundles"|"platform", bundles, remote } where `remote` is true
+// when cnspec will download policy bundles (policies come down; no file content
+// goes up). An adapter turns `kind`/`remote` into a one-time notice.
+export function cnspecPolicySource(kind, env = {}) {
+  const override = String(env.CNSPEC_POLICY_BUNDLE ?? "").trim();
+  const contentDir = String(env.CNSPEC_CONTENT_DIR ?? "").trim();
+  if (!override && !contentDir && isTruthy(env.CNSPEC_USE_PLATFORM)) {
+    return { kind: "platform", bundles: [], remote: false };
+  }
+  const bundles = cnspecBundlesFor(kind, override, contentDir);
+  return { kind: "bundles", bundles, remote: bundles.some(isRemoteBundle) };
+}
+
+function isTruthy(v) {
+  return /^(1|true|yes|on)$/i.test(String(v ?? "").trim());
+}
+
+function isRemoteBundle(b) {
+  return /^(https?|s3):\/\//i.test(b);
+}
+
+// cnspecPolicyNotice is the one line an adapter shows the first time a session
+// runs cnspec, so the policy download (or the Platform reporting) is never
+// silent. null when the scan neither downloads nor reports anything.
+export function cnspecPolicyNotice(source) {
+  if (source?.kind === "platform") {
+    return "cnspec is running your Mondoo Platform space's assigned IaC policies " +
+      "(CNSPEC_USE_PLATFORM); it reports scan results to that space.";
+  }
+  if (source?.remote) {
+    return "cnspec is downloading the latest policy bundles for IaC checks. Only " +
+      "policies are downloaded: your files are assessed on this machine and " +
+      "nothing is uploaded. Set CNSPEC_CONTENT_DIR to a local cnspec content " +
+      "checkout to work offline.";
+  }
+  return null;
 }
 
 // cnspecBundlesFor resolves the `-f` policy sources for an IaC kind, in
@@ -246,6 +324,14 @@ export function sarifFindings(doc) {
     }
   }
   return out;
+}
+
+// combineAdvisories joins the advisories from both engines into one tool result
+// (null when there are none). Only the first keeps the "File written." lead.
+export function combineAdvisories(texts) {
+  const parts = (Array.isArray(texts) ? texts : []).filter((t) => typeof t === "string" && t !== "");
+  if (parts.length === 0) return null;
+  return parts.map((t, i) => (i === 0 ? t : t.replace(/^File written\. /, ""))).join("\n\n");
 }
 
 export function iacAdvisoryText(file, kind, findings) {

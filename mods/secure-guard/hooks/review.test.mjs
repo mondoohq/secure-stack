@@ -23,6 +23,11 @@ import {
   cnspecBundlesFor,
   extractJsonObject,
   parseJsonObject,
+  alsoCodeScan,
+  iacNeedsContent,
+  cnspecPolicySource,
+  cnspecPolicyNotice,
+  combineAdvisories,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -247,4 +252,62 @@ test("parseJsonObject returns the object or null, never throws", () => {
   assert.equal(parseJsonObject("no json"), null);        // no object
   assert.equal(parseJsonObject('{"a":1'), null);          // unbalanced
   assert.equal(parseJsonObject("{not valid json}"), null); // balanced but invalid
+});
+
+test("cnspecScanArgs in platform mode: no bundles, no --incognito", () => {
+  assert.deepEqual(cnspecScanArgs("terraform", "main.tf", ["ignored.yaml"], { platform: true }),
+    ["scan", "terraform", "main.tf", "-o", "sarif"]);
+  assert.deepEqual(cnspecScanArgs("docker", "Dockerfile", [], { platform: true }),
+    ["scan", "docker", "file", "Dockerfile", "-o", "sarif"]);
+});
+
+test("cnspecPolicySource: bundle override → content dir → platform → public bundles", () => {
+  const pub = cnspecPolicySource("docker", {});
+  assert.equal(pub.kind, "bundles");
+  assert.equal(pub.remote, true);
+  assert.ok(pub.bundles.every((b) => b.startsWith("https://raw.githubusercontent.com/")));
+
+  const local = cnspecPolicySource("docker", { CNSPEC_CONTENT_DIR: "/c" });
+  assert.deepEqual(local, { kind: "bundles", bundles: ["/c/mondoo-dockerfile-security.mql.yaml", "/c/mondoo-dockerfile-best-practices.mql.yaml"], remote: false });
+
+  assert.deepEqual(cnspecPolicySource("k8s", { CNSPEC_USE_PLATFORM: "1" }), { kind: "platform", bundles: [], remote: false });
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_USE_PLATFORM: "true" }).kind, "platform");
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_USE_PLATFORM: "0" }).kind, "bundles");
+  // an explicit bundle or content dir wins over the platform switch
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_USE_PLATFORM: "1", CNSPEC_POLICY_BUNDLE: "p.yaml" }).kind, "bundles");
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_USE_PLATFORM: "1", CNSPEC_CONTENT_DIR: "/c" }).kind, "bundles");
+  // an s3:// or https:// override is a download too
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_POLICY_BUNDLE: "s3://b/p.yaml" }).remote, true);
+  assert.equal(cnspecPolicySource("k8s", { CNSPEC_POLICY_BUNDLE: "./p.yaml" }).remote, false);
+});
+
+test("cnspecPolicyNotice says what goes where, and nothing when fully local", () => {
+  assert.match(cnspecPolicyNotice({ kind: "bundles", remote: true }), /nothing is uploaded/);
+  assert.match(cnspecPolicyNotice({ kind: "platform", remote: false }), /reports scan results/);
+  assert.equal(cnspecPolicyNotice({ kind: "bundles", remote: false }), null);
+  assert.equal(cnspecPolicyNotice(undefined), null);
+});
+
+test("alsoCodeScan: Terraform and Dockerfiles get xgrep too, K8s/CFN do not", () => {
+  assert.equal(alsoCodeScan("terraform"), true);
+  assert.equal(alsoCodeScan("docker"), true);
+  assert.equal(alsoCodeScan("k8s"), false);
+  assert.equal(alsoCodeScan("cloudformation"), false);
+});
+
+test("iacNeedsContent: only YAML/JSON need content to classify", () => {
+  assert.equal(iacNeedsContent("k8s/deploy.yaml"), true);
+  assert.equal(iacNeedsContent("C:\\infra\\stack.YML"), true);
+  assert.equal(iacNeedsContent("cfn.json"), true);
+  assert.equal(iacNeedsContent("main.tf.json"), false);
+  assert.equal(iacNeedsContent("main.tf"), false);
+  assert.equal(iacNeedsContent("Dockerfile"), false);
+  assert.equal(iacNeedsContent(""), false);
+});
+
+test("combineAdvisories joins both engines; one 'File written.' lead; null when empty", () => {
+  const t = combineAdvisories(["File written. cnspec policy found 1 issue(s)", null, "File written. xgrep flagged 1"]);
+  assert.equal(t, "File written. cnspec policy found 1 issue(s)\n\nxgrep flagged 1");
+  assert.equal(combineAdvisories([null, ""]), null);
+  assert.equal(combineAdvisories(undefined), null);
 });

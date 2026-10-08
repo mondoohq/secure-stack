@@ -12,9 +12,10 @@
 //  2. Inline code review (xgrep). After the agent writes or edits code, it scans
 //     the file with xgrep (SAST/SCA/secrets) and hands high-confidence findings
 //     back beside the tool result so the agent can fix them in the same turn.
-//  3. IaC policy guard (cnspec). After the agent writes Terraform, a Dockerfile,
-//     or a Kubernetes/CloudFormation manifest, it runs cnspec policy checks and
-//     hands the violations back the same way.
+//  3. IaC policy guard (cnspec). After the agent writes or edits Terraform, a
+//     Dockerfile, or a Kubernetes/CloudFormation manifest, it runs cnspec policy
+//     checks and hands the violations back the same way. Terraform and
+//     Dockerfiles get the xgrep code review too, for hard-coded secrets.
 //
 // All inline review is advisory — the edit always lands; only the shell guard
 // can hold/block. It prefers a local xgrep; if none new enough is installed it
@@ -23,8 +24,12 @@
 //
 // All scanning is LOCAL: rules execute on this machine (in-process, or via a
 // localhost-only daemon). Commands and code are never uploaded and nothing is
-// evaluated server-side — the only network activity is the one-time, visible
-// binary fetch (the scanner, not your data).
+// evaluated server-side. What does come DOWN, each time visibly: the xgrep
+// binary when none new enough is installed, and — unless CNSPEC_CONTENT_DIR
+// points at a local copy — the latest public cnspec policy bundles. Those are
+// policies, not your data; cnspec runs --incognito and reports nothing. The one
+// exception is opt-in: CNSPEC_USE_PLATFORM runs the policies assigned in your
+// Mondoo Platform space, and cnspec reports those scan results to that space.
 //
 // The mod only reaches outside its own code through the injected `$` API
 // (`$.process`, `$.http`, `$.fs`, `$.store`, `$.env`, `$.ui`, `$.clock`), so
@@ -50,8 +55,9 @@ import {
   XGREP_NPM, XGREP_PIN, XGREP_MIN, CNSPEC_INSTALL_URL,
   parseVersion, meetsMin, normalizeVerdict,
   highConfidenceFindings, advisoryText, isScannable,
-  iacScanKind, cnspecScanArgs, cnspecBundlesFor, sarifFindings, iacAdvisoryText,
-  parseJsonObject,
+  iacScanKind, iacNeedsContent, alsoCodeScan, combineAdvisories,
+  cnspecScanArgs, cnspecPolicySource, cnspecPolicyNotice, sarifFindings, iacAdvisoryText,
+  parseJsonObject, IAC_TIMEOUT_MS,
 } from "./core.mjs";
 
 const DOCS_URL = "https://mondoo.com/docs/xgrep/ai-agents/guard-hooks"; // what the guard does
@@ -62,8 +68,9 @@ const HOLD_LIMIT_MS = 10 * 60 * 1000;
 
 // cnspec (IaC policy engine) resolution state. cnspec has no npm package, so
 // resolution is CNSPEC_PATH → `cnspec` on PATH → unavailable (IaC guard off).
-const IAC_TIMEOUT_MS = 30000; // a policy scan is heavier than a per-file grep
 let cnspecBackend = null; // { mode: "ok", cmd } | { mode: "unavailable", reason }
+// Whether this session has shown the policy-source notice (download/Platform).
+let cnspecNoticeShown = false;
 
 // Inline review timeout; fail-open on any error/timeout. The skip set + the
 // "is this file worth scanning" decision live in core (isScannable).
@@ -133,9 +140,10 @@ export function register(on) {
     const r = await next(e);
     if (!r || r.deny || r.isError) return r; // tool blocked or failed — nothing landed
     try {
-      // Route by artifact: IaC (Terraform/Dockerfile/K8s/CFN) → cnspec policy;
-      // everything else scannable → xgrep code review.
-      const kind = iacScanKind(String(e.file_path ?? ""), typeof e.content === "string" ? e.content : undefined);
+      // Route by artifact: IaC (Terraform/Dockerfile/K8s/CFN) → cnspec policy,
+      // plus xgrep for Terraform/Dockerfiles; everything else → xgrep review.
+      const file = String(e.file_path ?? "");
+      const kind = iacScanKind(file, await contentForRouting($, e, file));
       if (kind) return await reviewIac($, e, r, kind);
       return await reviewEdit($, e, r);
     } catch (err) {
@@ -342,21 +350,28 @@ async function evaluateInProcess($, b, command) {
 
 // ─── Inline review ───────────────────────────────────────────────────────────
 
+// contentForRouting returns the file's full content when routing needs it. A
+// Write carries it; an Edit/MultiEdit carries only a fragment, so for a path
+// that can only be classified by content (YAML/JSON → K8s? CFN?) read the file
+// as it now stands — the edit has already landed. Unreadable → undefined, and
+// the file is simply not treated as IaC (fail-open).
+async function contentForRouting($, e, file) {
+  if (typeof e.content === "string") return e.content;
+  if (!file || !iacNeedsContent(file)) return undefined;
+  try {
+    return await $.fs.read(file);
+  } catch {
+    return undefined;
+  }
+}
+
 // reviewEdit scans the file a Write/Edit/MultiEdit just touched and, if there are
 // high-confidence security findings, returns the tool result augmented with them.
 // `r` is what the tool itself returned (the write already happened). On anything
 // uninteresting it returns `r` unchanged.
 async function reviewEdit($, e, r) {
   if (!r || r.deny || r.isError) return r; // tool blocked or failed — nothing landed
-  const file = String(e.file_path ?? "");
-  if (!file || !isScannable(file)) return r;
-
-  const b = await ensureBackend($);
-  if (b.mode === "unavailable") return r; // scanner not here — stay quiet (fail open)
-
-  const findings = await scanFile($, b, file);
-  if (findings.length === 0) return r;
-  return withAdvisory(r, advisoryText(file, findings));
+  return withAdvisory(r, await codeAdvisory($, String(e.file_path ?? "")));
 }
 
 // withAdvisory attaches findings to the tool's own result as `context`, which
@@ -367,6 +382,16 @@ async function reviewEdit($, e, r) {
 function withAdvisory(r, text) {
   if (!text) return r;
   return { ...r, context: [...(r.context ?? []), text] };
+}
+
+// codeAdvisory runs the xgrep code review on one file and returns the advisory
+// text, or null when the file isn't scannable, xgrep isn't here, or it's clean.
+async function codeAdvisory($, file) {
+  if (!file || !isScannable(file)) return null;
+  const b = await ensureBackend($);
+  if (b.mode === "unavailable") return null; // scanner not here — stay quiet (fail open)
+  const findings = await scanFile($, b, file);
+  return findings.length ? advisoryText(file, findings) : null;
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -404,22 +429,49 @@ async function ensureCnspec($) {
   return cnspecBackend;
 }
 
-// reviewIac scans an IaC file the agent just wrote with cnspec and, if policy
-// checks fail, returns them as the tool result. Fail-open: cnspec missing or any
-// error returns the original result unchanged.
+// reviewIac scans an IaC file the agent just wrote with cnspec — and, for
+// Terraform and Dockerfiles, with xgrep too — and returns any findings as the
+// tool result. The two engines run side by side and each fails open on its own:
+// one missing or erroring never hides the other's findings.
 async function reviewIac($, e, r, kind) {
   const file = String(e.file_path ?? "");
   if (!file) return r;
+  const quiet = (leg) => (err) => {
+    $.ui.log(`secure-guard: ${leg} review error (${err?.message ?? err}); not reporting`);
+    return null;
+  };
+  const [iac, code] = await Promise.all([
+    iacAdvisory($, file, kind).catch(quiet("cnspec")),
+    alsoCodeScan(kind) ? codeAdvisory($, file).catch(quiet("xgrep")) : null,
+  ]);
+  return withAdvisory(r, combineAdvisories([iac, code]));
+}
+
+// iacAdvisory runs cnspec on one IaC file and returns the advisory text, or null
+// when cnspec isn't installed or every check passed.
+async function iacAdvisory($, file, kind) {
   const b = await ensureCnspec($);
-  if (b.mode !== "ok") return r; // cnspec not installed — stay quiet
+  if (b.mode !== "ok") return null; // cnspec not installed — stay quiet
   const findings = await cnspecScan($, b, kind, file);
-  if (findings.length === 0) return r;
-  return withAdvisory(r, iacAdvisoryText(file, kind, findings));
+  return findings.length ? iacAdvisoryText(file, kind, findings) : null;
 }
 
 async function cnspecScan($, b, kind, file) {
-  const bundles = cnspecBundlesFor(kind, (await $.env.get("CNSPEC_POLICY_BUNDLE")) || "", (await $.env.get("CNSPEC_CONTENT_DIR")) || "");
-  const run = await $.process.run([...b.cmd, ...cnspecScanArgs(kind, file, bundles)], { timeoutMs: IAC_TIMEOUT_MS });
+  const source = cnspecPolicySource(kind, {
+    CNSPEC_POLICY_BUNDLE: await $.env.get("CNSPEC_POLICY_BUNDLE"),
+    CNSPEC_CONTENT_DIR: await $.env.get("CNSPEC_CONTENT_DIR"),
+    CNSPEC_USE_PLATFORM: await $.env.get("CNSPEC_USE_PLATFORM"),
+  });
+  const notice = cnspecPolicyNotice(source);
+  if (notice && !cnspecNoticeShown) {
+    cnspecNoticeShown = true;
+    $.ui.toast(source.kind === "platform"
+      ? "secure-guard: cnspec is using your Mondoo Platform policies"
+      : "secure-guard: cnspec is downloading the latest policies (nothing is uploaded)");
+    $.ui.log(`secure-guard: ${notice}`);
+  }
+  const args = cnspecScanArgs(kind, file, source.bundles, { platform: source.kind === "platform" });
+  const run = await $.process.run([...b.cmd, ...args], { timeoutMs: IAC_TIMEOUT_MS });
   const doc = parseJsonObject(run.stdout ?? "");
   return doc ? sarifFindings(doc) : [];
 }
