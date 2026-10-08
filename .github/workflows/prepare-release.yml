@@ -249,11 +249,24 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
-          if [ -f CHANGELOG.md ]; then
-            { cat release-notes.md; echo; cat CHANGELOG.md; } > CHANGELOG.md.tmp
-          else
-            { echo "# Changelog"; echo; cat release-notes.md; } > CHANGELOG.md.tmp
-          fi
+          # Assemble CHANGELOG.md with the new section directly under the
+          # "# Changelog" title. Prepending the whole old file (title included)
+          # would bury the H1 below the new section — and release.yml's extractor,
+          # which stops at the next `## `, would then sweep that stray `# Changelog`
+          # line into the Release body.
+          {
+            echo "# Changelog"
+            echo
+            cat release-notes.md
+            if [ -f CHANGELOG.md ]; then
+              echo
+              # Existing entries with the old "# Changelog" header (and the blank
+              # line under it) dropped, so the title is not duplicated.
+              awk 'NR==1 && $0=="# Changelog" {seen=1; next}
+                   seen && !body && NF==0 {next}
+                   {body=1; print}' CHANGELOG.md
+            fi
+          } > CHANGELOG.md.tmp
           mv CHANGELOG.md.tmp CHANGELOG.md
 
       - name: Open or refresh the release PR
