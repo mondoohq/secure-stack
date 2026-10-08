@@ -37,6 +37,7 @@ tooling.
 
 # Guard mod + adapters — unit tests (no scanner binaries needed):
 node --test mods/secure-guard/hooks/*.test.mjs integrations/shared/*.test.mjs
+claude plugin test mods/secure-guard   # the Claude mod's hooks, run by Claude Code itself
 node --experimental-strip-types integrations/pi/smoke.test.ts
 node --experimental-strip-types integrations/opencode/smoke.test.ts
 

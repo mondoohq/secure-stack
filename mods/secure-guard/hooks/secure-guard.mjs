@@ -11,7 +11,7 @@
 //     Proceed / Cancel, holding the call until you answer.
 //  2. Inline code review (xgrep). After the agent writes or edits code, it scans
 //     the file with xgrep (SAST/SCA/secrets) and hands high-confidence findings
-//     back as the tool result so the agent can fix them in the same turn.
+//     back beside the tool result so the agent can fix them in the same turn.
 //  3. IaC policy guard (cnspec). After the agent writes Terraform, a Dockerfile,
 //     or a Kubernetes/CloudFormation manifest, it runs cnspec policy checks and
 //     hands the violations back the same way.
@@ -125,10 +125,10 @@ export function register(on) {
   });
 
   // Inline review: let the write/edit happen, then scan the file it touched and,
-  // if there are high-confidence security findings, return them as the tool
-  // result so Claude sees them and can fix them in the same turn. `next` runs the
-  // tool exactly once (outside the scan try/catch), so any scan error fails OPEN
-  // — the edit stays, we just stay quiet.
+  // if there are high-confidence security findings, attach them to the tool's
+  // result (withAdvisory) so Claude sees them and can fix them in the same turn.
+  // `next` runs the tool exactly once (outside the scan try/catch), so any scan
+  // error fails OPEN — the edit stays, we just stay quiet.
   on("tool.call", { tool: ["Write", "Edit", "MultiEdit"] }, async ($, e, next) => {
     const r = await next(e);
     if (!r || r.deny || r.isError) return r; // tool blocked or failed — nothing landed
@@ -243,7 +243,7 @@ async function ensureBackend($) {
   if (backend) return backend;
 
   const candidates = [];
-  const envPath = $.env.get("XGREP_PATH");
+  const envPath = await $.env.get("XGREP_PATH"); // $.env.get resolves async
   if (envPath) candidates.push([envPath]);
   candidates.push(["xgrep"]);
 
@@ -356,7 +356,17 @@ async function reviewEdit($, e, r) {
 
   const findings = await scanFile($, b, file);
   if (findings.length === 0) return r;
-  return { result: advisoryText(file, findings) };
+  return withAdvisory(r, advisoryText(file, findings));
+}
+
+// withAdvisory attaches findings to the tool's own result as `context`, which
+// the model reads right after the result (like a PostToolUse reminder). The
+// result itself must stay the tool's record: core validates a hook's `result`
+// against the tool's output schema, and a bare string there turns the
+// successful write into a tool error the model can't act on.
+function withAdvisory(r, text) {
+  if (!text) return r;
+  return { ...r, context: [...(r.context ?? []), text] };
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -381,7 +391,7 @@ async function scanFile($, b, file) {
 async function ensureCnspec($) {
   if (cnspecBackend) return cnspecBackend;
   const candidates = [];
-  const envPath = $.env.get("CNSPEC_PATH");
+  const envPath = await $.env.get("CNSPEC_PATH");
   if (envPath) candidates.push([envPath]);
   candidates.push(["cnspec"]);
   for (const cmd of candidates) {
@@ -404,11 +414,11 @@ async function reviewIac($, e, r, kind) {
   if (b.mode !== "ok") return r; // cnspec not installed — stay quiet
   const findings = await cnspecScan($, b, kind, file);
   if (findings.length === 0) return r;
-  return { result: iacAdvisoryText(file, kind, findings) };
+  return withAdvisory(r, iacAdvisoryText(file, kind, findings));
 }
 
 async function cnspecScan($, b, kind, file) {
-  const bundles = cnspecBundlesFor(kind, $.env.get("CNSPEC_POLICY_BUNDLE") || "", $.env.get("CNSPEC_CONTENT_DIR") || "");
+  const bundles = cnspecBundlesFor(kind, (await $.env.get("CNSPEC_POLICY_BUNDLE")) || "", (await $.env.get("CNSPEC_CONTENT_DIR")) || "");
   const run = await $.process.run([...b.cmd, ...cnspecScanArgs(kind, file, bundles)], { timeoutMs: IAC_TIMEOUT_MS });
   const doc = parseJsonObject(run.stdout ?? "");
   return doc ? sarifFindings(doc) : [];
