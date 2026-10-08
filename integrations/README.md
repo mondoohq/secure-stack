@@ -51,6 +51,7 @@ call — a guard must never wedge the session.
 - **node** on `PATH`.
 - **xgrep** with `guard --command` (≥ 0.78) on `PATH` or via `XGREP_PATH` —
   [xgrep.ai](https://xgrep.ai) / [docs](https://mondoo.com/docs/xgrep) / `@mondoohq/xgrep` on npm.
+  Without one, every adapter fetches the release the Claude mod pins, via `npx`, visibly.
 - **cnspec** on `PATH` or via `CNSPEC_PATH` for the IaC leg (optional). By default it runs the
   latest public policy bundles, downloaded when it scans: only policies come down, and the file
   is assessed locally with nothing uploaded. See the

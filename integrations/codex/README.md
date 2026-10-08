@@ -35,6 +35,9 @@ idempotent.
 - **xgrep** on `PATH` (or `XGREP_PATH=/path/to/xgrep`), new enough to support
   `guard --command` (≥ 0.78). Get it from [xgrep.ai](https://xgrep.ai) /
   [docs](https://mondoo.com/docs/xgrep) / the `@mondoohq/xgrep` npm package.
+  If none new enough is installed, the hook fetches the pinned release from the
+  `@mondoohq/xgrep` npm package via `npx` (the scanner, not your data), says so on stderr,
+  and remembers it for later calls. Install it yourself to skip that: `npm i -g @mondoohq/xgrep`.
 - **cnspec** on `PATH` (or `CNSPEC_PATH`) for the IaC leg — optional; without it the
   IaC check stays silently off. See the mod README for the policy-bundle options.
 
@@ -44,8 +47,10 @@ The hook reads the tool event as JSON on **stdin** and, when it blocks, writes o
 JSON line to **stdout**:
 
 ```json
-{"decision":"block","reason":"secure-guard: <summary>. Do not retry unless the user asks."}
+{"decision":"block","reason":"secure-guard blocked this command before it ran. <xgrep's summary and fix>"}
 ```
 
-No output means **allow**. (`"ask"` is also supported if you prefer a prompt over a
-hard block.)
+No output means **allow**. When xgrep rates a command `ask` rather than `deny`, the hook
+answers `{"decision":"ask",…}`, so Codex prompts you instead of hard-blocking. A blocked
+**Write** says `Not written: … Fix them and write the file again`, since a pre-tool block
+means the file never landed.

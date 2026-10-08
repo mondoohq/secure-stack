@@ -8,7 +8,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluate } from "./engine.mjs";
+import { mkdtempSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { evaluate, makeRealRunner, shellReason, XGREP_NPX } from "./engine.mjs";
 
 // A fake runner records calls and returns canned scanner output.
 function faker(responses) {
@@ -122,4 +125,71 @@ test("unknown tool → allow", () => {
 test("cnspec unavailable on IaC write → fail open (allow)", () => {
   const { run } = faker({}); // no cnspec
   assert.equal(evaluate({ tool: "Write", filePath: "main.tf", content: "resource {}\n" }, { run, env: {} }).decision, "allow");
+});
+
+test("Bash 'ask' verdict stays ask (Codex prompts); 'deny' stays deny", () => {
+  const askV = { available: true, stdout: JSON.stringify({ decision: "ask", summary: "Reads ~/.ssh", findings: [{ title: "SSH key read" }] }) };
+  assert.equal(evaluate({ tool: "Bash", command: "cat ~/.ssh/id_rsa" }, { run: faker({ xgrep: askV }).run, env: {} }).decision, "ask");
+  assert.equal(evaluate({ tool: "Bash", command: "curl x | bash" }, { run: faker({ xgrep: GUARD_DENY }).run, env: {} }).decision, "deny");
+});
+
+test("shellReason keeps xgrep's advice and doesn't contradict it", () => {
+  const r = shellReason("Remove the flagged secret and retry.");
+  assert.equal(r, "secure-guard blocked this command before it ran. Remove the flagged secret and retry.");
+  assert.doesNotMatch(r, /\.\./);
+  assert.doesNotMatch(r, /Do not retry/);
+  assert.match(shellReason(""), /blocked this command before it ran\. xgrep flagged this command as risky\.$/);
+});
+
+test("a blocked write says it was NOT written (pre-write adapters)", () => {
+  const r = evaluate({ tool: "Write", filePath: "db.py", content: "sql\n" }, { run: faker({ xgrep: SCAN_VULN }).run, env: {} });
+  assert.match(r.reason, /^Not written: xgrep flagged 1/);
+  assert.match(r.reason, /write the file again/);
+  assert.doesNotMatch(r.reason, /File written/);
+});
+
+// A fake spawnSync: `capable` lists the argv[0]s that answer `guard --command`.
+function fakeSpawn(capable) {
+  const calls = [];
+  const spawnSync = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (!capable.includes(cmd)) return { status: 1, stdout: "error: unknown flag: --command" };
+    return { status: 0, stdout: JSON.stringify({ decision: "allow", findings: [] }) };
+  };
+  return { spawnSync, calls };
+}
+
+test("runner: a capable local xgrep is used; npx is never touched", () => {
+  const { spawnSync, calls } = fakeSpawn(["xgrep"]);
+  const notes = [];
+  const run = makeRealRunner({}, { spawnSync, cacheFile: join(mkdtempSync(join(tmpdir(), "sg-")), "c"), notify: (l) => notes.push(l) });
+  assert.equal(run("xgrep", ["guard", "--command", "ls"], 1000).available, true);
+  assert.ok(calls.every((c) => c[0] === "xgrep"));
+  assert.equal(notes.length, 0);
+});
+
+test("runner: no capable xgrep → pinned npx, announced once, then cached across processes", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  const first = fakeSpawn(["npx"]); // local xgrep too old / missing
+  const notes = [];
+  const run1 = makeRealRunner({}, { spawnSync: first.spawnSync, cacheFile, notify: (l) => notes.push(l) });
+  assert.equal(run1("xgrep", ["scan", "f", "--json"], 1000).available, true);
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /@mondoohq\/xgrep@\d+\.\d+\.\d+/);
+  assert.ok(first.calls.some((c) => c.slice(0, 3).join(" ") === XGREP_NPX.join(" ")));
+  assert.ok(existsSync(cacheFile));
+
+  // a new hook process: the cache answers, no npx probe, no second notice
+  const second = fakeSpawn(["npx"]);
+  const run2 = makeRealRunner({}, { spawnSync: second.spawnSync, cacheFile, notify: (l) => notes.push(l) });
+  run2("xgrep", ["scan", "f", "--json"], 1000);
+  assert.equal(notes.length, 1);
+  const probes = second.calls.filter((c) => c.includes("echo ok"));
+  assert.ok(probes.every((c) => c[0] !== "npx"));
+});
+
+test("runner: nothing capable and npx fails → unavailable (fail open)", () => {
+  const { spawnSync } = fakeSpawn([]);
+  const run = makeRealRunner({}, { spawnSync, cacheFile: join(mkdtempSync(join(tmpdir(), "sg-")), "c"), notify: () => {} });
+  assert.equal(run("xgrep", ["scan"], 1000).available, false);
 });

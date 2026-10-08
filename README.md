@@ -160,7 +160,7 @@ gets a thin adapter under [`integrations/`](integrations/).
 | Agent | Shape | Install | Posture |
 |-------|-------|---------|---------|
 | **Claude Code** | in-process mod | `/plugin install secure-guard@secure-stack` | shell blocks; code/IaC advisory (post-write) |
-| **OpenAI Codex** | external pre-tool hook | `node integrations/codex/install.mjs` | shell + code + IaC block (pre-write) |
+| **OpenAI Codex** | external pre-tool hook | `node integrations/codex/install.mjs` | shell block or ask; code + IaC block (pre-write) |
 | **Mistral Vibe** | external pre-tool hook | `node integrations/vibe/install.mjs` | shell + code + IaC deny (pre-write) |
 | **Pi** | in-process TS extension | load `integrations/pi` as a Pi extension | block (pre-write); `ask` via `ctx.ui.confirm` |
 | **opencode** | in-process TS plugin | copy `plugin.ts` into `.opencode/plugins/` | deny via throw (pre-write); no native `ask` |

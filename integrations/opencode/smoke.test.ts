@@ -36,6 +36,10 @@ assert.throws(
 );
 
 // unknown tool → no throw
+// an "ask" verdict denies too (opencode has no native ask) — never a silent allow
+const askRun = () => ({ available: true, stdout: JSON.stringify({ decision: "ask", summary: "Reads ~/.ssh", findings: [{ title: "SSH key read" }] }) });
+assert.throws(() => opencodeGuard({ tool: "Bash", args: { command: "cat ~/.ssh/id_rsa" } }, { run: askRun, env: {} }), /Reads ~\/\.ssh/);
+
 assert.doesNotThrow(() => opencodeGuard({ tool: "Read", args: { file_path: "x" } }, { run: denyRun, env: {} }));
 
 console.log("✓ opencode adapter smoke ok");
