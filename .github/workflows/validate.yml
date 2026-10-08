@@ -24,6 +24,8 @@ on:
       # (it reads skills/<name>/SKILL.md and does not recurse). If skills are ever
       # nested deeper, this filter and that function have to change together.
       - "skills/*/.claude-plugin/plugin.json"
+      # Mod manifests carry the same release version (see collectMods()).
+      - "mods/*/.claude-plugin/plugin.json"
 
 jobs:
   validate:

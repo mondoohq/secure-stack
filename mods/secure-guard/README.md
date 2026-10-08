@@ -22,6 +22,22 @@ Inline review is **advisory** (the edit always lands); only the shell guard can 
 Everything is **fail-open**: a scanner that is missing, too old, or errors never wedges your
 session.
 
+## Install
+
+```
+/plugin install secure-guard --marketplace mondoohq/secure-stack
+```
+
+That works in one step on Claude Code 2.1.275 or later. On an older version, add the
+marketplace first:
+
+```bash
+claude plugin marketplace add mondoohq/secure-stack
+claude plugin install secure-guard@secure-stack
+```
+
+The mod loads in your next session. Run `/secure-guard` to check it is reaching its engines.
+
 ## The two engines
 
 - **xgrep** (shell + code) — fetched automatically from the public npm package if a

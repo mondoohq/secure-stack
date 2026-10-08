@@ -2,9 +2,9 @@
 /**
  * Generate agents/SKILLS.md from SKILLS_TEMPLATE.md and SKILL.md frontmatter.
  *
- * Also validates that marketplace.json is in sync with discovered skills,
- * that every skill's plugin.json carries the repo-wide release version,
- * and updates the skills table in README.md.
+ * Also validates that marketplace.json is in sync with discovered skills and
+ * mods, that every skill's and mod's plugin.json carries the repo-wide release
+ * version, and updates the skills table in README.md.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
@@ -87,6 +87,12 @@ const INTEGRATIONS: Integration[] = [
   },
 ];
 
+/** A Claude Code mod under mods/<name>/ — a plugin of hooks, not a skill. */
+interface Mod {
+  name: string;
+  path: string;
+}
+
 interface MarketplacePlugin {
   name: string;
   source: string;
@@ -126,6 +132,25 @@ function collectSkills(): Skill[] {
   }
 
   return skills.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
+/**
+ * Mods live one level under mods/, each with its own .claude-plugin/plugin.json.
+ * They ship through the same marketplace and carry the same release version as
+ * the skills, so they are validated alongside them.
+ */
+function collectMods(): Mod[] {
+  const modsDir = join(ROOT, "mods");
+  if (!existsSync(modsDir)) return [];
+
+  const mods: Mod[] = [];
+  for (const entry of readdirSync(modsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(modsDir, entry.name, ".claude-plugin", "plugin.json");
+    if (!existsSync(manifestPath)) continue;
+    mods.push({ name: entry.name, path: relative(ROOT, join(modsDir, entry.name)) });
+  }
+  return mods.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -193,7 +218,7 @@ const SIBLING_METADATA_MANIFESTS = [
  * way (mondoohq/cnspec#3613). Failing the build is how that stays impossible
  * here.
  */
-function validateVersions(skills: Skill[]): string[] {
+function validateVersions(skills: Skill[], mods: Mod[]): string[] {
   const errors: string[] = [];
   const rootVersion = loadRootVersion();
 
@@ -243,6 +268,17 @@ function validateVersions(skills: Skill[]): string[] {
           `'${manifest.version}' != root '${rootVersion}'. ` +
           `Versions are stamped by the release workflow; do not edit them by hand.`
       );
+    }
+  }
+
+  // Mods update in place the same way skills do, so an unstamped mod version
+  // strands every installed user on the mod they first installed.
+  for (const mod of mods) {
+    const rel = join(mod.path, ".claude-plugin", "plugin.json");
+    errors.push(...checkManifestVersion(rel, rootVersion, (m) => m.version));
+    const manifest = JSON.parse(readFileSync(join(ROOT, rel), "utf-8")) as { name?: string };
+    if (manifest.name !== mod.name) {
+      errors.push(`Name mismatch in ${rel}: directory='${mod.name}', plugin.json='${manifest.name}'`);
     }
   }
 
@@ -430,12 +466,13 @@ function validateIntegrations(): string[] {
   return errors;
 }
 
-function validateMarketplace(skills: Skill[]): string[] {
+function validateMarketplace(skills: Skill[], mods: Mod[]): string[] {
   const errors: string[] = [];
   const marketplace = loadMarketplace();
   const plugins = marketplace.plugins;
 
   const skillBySource = new Map(skills.map((s) => [`./${s.path}`, s]));
+  const modBySource = new Map(mods.map((m) => [`./${m.path}`, m]));
   const pluginBySource = new Map(plugins.map((p) => [p.source, p]));
 
   for (const skill of skills) {
@@ -450,10 +487,22 @@ function validateMarketplace(skills: Skill[]): string[] {
     }
   }
 
-  for (const plugin of plugins) {
-    if (!skillBySource.has(plugin.source)) {
+  for (const mod of mods) {
+    const expectedSource = `./${mod.path}`;
+    const plugin = pluginBySource.get(expectedSource);
+    if (!plugin) {
+      errors.push(`Mod '${mod.name}' at '${mod.path}' is missing from marketplace.json`);
+    } else if (plugin.name !== mod.name) {
       errors.push(
-        `Marketplace plugin '${plugin.name}' at '${plugin.source}' has no SKILL.md`
+        `Name mismatch at '${expectedSource}': directory='${mod.name}', marketplace.json='${plugin.name}'`
+      );
+    }
+  }
+
+  for (const plugin of plugins) {
+    if (!skillBySource.has(plugin.source) && !modBySource.has(plugin.source)) {
+      errors.push(
+        `Marketplace plugin '${plugin.name}' at '${plugin.source}' has no SKILL.md or mod manifest`
       );
     }
   }
@@ -464,13 +513,14 @@ function validateMarketplace(skills: Skill[]): string[] {
 function main(): void {
   const template = readFileSync(TEMPLATE_PATH, "utf-8");
   const skills = collectSkills();
+  const mods = collectMods();
   const output = render(template, skills);
 
   mkdirSync(dirname(OUTPUT_PATH), { recursive: true });
   writeFileSync(OUTPUT_PATH, output, "utf-8");
   console.log(`Wrote ${OUTPUT_PATH} with ${skills.length} skills.`);
 
-  const errors = validateMarketplace(skills);
+  const errors = validateMarketplace(skills, mods);
   if (errors.length > 0) {
     console.error("\nMarketplace.json validation errors:");
     for (const error of errors) {
@@ -490,7 +540,7 @@ function main(): void {
   }
   console.log(`Agent Skills spec OK (${skills.length} skills).`);
 
-  const versionErrors = validateVersions(skills);
+  const versionErrors = validateVersions(skills, mods);
   if (versionErrors.length > 0) {
     console.error("\nPlugin version validation errors:");
     for (const error of versionErrors) {
