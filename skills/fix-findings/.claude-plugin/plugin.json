@@ -1,6 +1,6 @@
 {
   "name": "fix-findings",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Fix xgrep security findings and prove each fix holds — one finding or a whole set (or the triage-confirmed true positives) — through the verify/apply harness",
   "author": {
     "name": "Mondoo"

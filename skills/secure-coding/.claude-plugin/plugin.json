@@ -1,6 +1,6 @@
 {
   "name": "secure-coding",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Secure coding guidance for AI agents - proactively avoid generating vulnerable code patterns across 7 languages",
   "author": {
     "name": "Mondoo"

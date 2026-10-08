@@ -1,5 +1,38 @@
 # Changelog
 
+## v2.0.0 - 2026-10-08
+
+Renames the hub to **secure-stack** and reorganizes it around outcomes — two
+skill families (secure development + secure posture), a runtime `secure-guard`
+mod across five agents, and a single OWASP coverage page.
+
+### ⚠️ Breaking — reinstall under the new names
+
+Existing installs keep working but stop receiving updates under the old names.
+
+- **Marketplace / repo:** `mondoohq/skills` → `mondoohq/secure-stack` (the old
+  path still redirects). Re-add it: `/plugin marketplace add mondoohq/secure-stack`.
+- **Skills renamed** (install with `…@secure-stack`): `xgrep-inspect` →
+  `understand-code`, `xgrep-triage` → `triage-findings`, `xgrep-remediate` +
+  `xgrep-fix` → `fix-findings` (merged), `xgrep-rule-creator` →
+  `author-detections`, `secure-development` → `secure-pipeline`.
+- **Runtime guard mod renamed:** `secure-dev-guard` → `secure-guard`.
+
+### New
+
+- Secure posture skills: `secure-os`, `secure-cloud`, `secure-saas`, `secure-ai-services`.
+- A runtime `secure-guard` mod with adapters for Claude, Codex, Mistral Vibe, Pi, and opencode.
+- A single OWASP Top 10 2025 coverage page (`docs/owasp.md`, app + LLM/GenAI).
+- An optional Slack release notification.
+
+### Commits
+
+- docs(readme): move the MQL-skill note from the top to its own section near the end (#22)
+- ci(release): optional Slack release notification (ported from skillcheck) (#21)
+- fix(secure-guard): unify cnspec JSON parsing behind a never-throwing parseJsonObject (#20)
+- Secure your stack with AI agents: restructure the hub (secure-stack) (#19)
+- docs: point agents at xgrep guard and say what to do when it blocks (#18)
+
 ## v1.0.1 - 2026-09-07
 
 - feat: release by merging a release PR, and fix a release that cannot run (#16)
