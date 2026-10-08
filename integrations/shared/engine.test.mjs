@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { evaluate, makeRealRunner, shellReason, XGREP_NPX } from "./engine.mjs";
+import { evaluate, makeRealRunner, shellReason, XGREP_NPX, XGREP_NPX_CACHE } from "./engine.mjs";
 
 // A fake runner records calls and returns canned scanner output.
 function faker(responses) {
@@ -148,7 +148,8 @@ test("a blocked write says it was NOT written (pre-write adapters)", () => {
   assert.doesNotMatch(r.reason, /File written/);
 });
 
-// A fake spawnSync: `capable` lists the argv[0]s that answer `guard --command`.
+// A fake spawnSync: `capable` lists the argv[0]s that answer `guard --command`
+// (and `version`). Every process the runner starts must go through it.
 function fakeSpawn(capable) {
   const calls = [];
   const spawnSync = (cmd, args) => {
@@ -158,6 +159,7 @@ function fakeSpawn(capable) {
   };
   return { spawnSync, calls };
 }
+const fakeClock = (t) => ({ now: () => t.ms });
 
 test("runner: a capable local xgrep is used; npx is never touched", () => {
   const { spawnSync, calls } = fakeSpawn(["xgrep"]);
@@ -192,4 +194,47 @@ test("runner: nothing capable and npx fails → unavailable (fail open)", () => 
   const { spawnSync } = fakeSpawn([]);
   const run = makeRealRunner({}, { spawnSync, cacheFile: join(mkdtempSync(join(tmpdir(), "sg-")), "c"), notify: () => {} });
   assert.equal(run("xgrep", ["scan"], 1000).available, false);
+});
+
+test("runner: every process goes through the injected spawn — scans and cnspec too", () => {
+  const { spawnSync, calls } = fakeSpawn(["xgrep", "cnspec"]);
+  const run = makeRealRunner({}, { spawnSync, cacheFile: join(mkdtempSync(join(tmpdir(), "sg-")), "c"), notify: () => {} });
+  assert.equal(run("xgrep", ["scan", "f", "--json"], 1000).available, true);
+  assert.equal(run("cnspec", ["scan", "terraform", "main.tf"], 1000).available, true);
+  assert.ok(calls.some((c) => c[0] === "xgrep" && c[1] === "scan"), "the xgrep scan itself is injected");
+  assert.ok(calls.some((c) => c[0] === "cnspec" && c[1] === "version"), "cnspec resolution is injected");
+  assert.ok(calls.some((c) => c[0] === "cnspec" && c[1] === "scan"), "the cnspec scan itself is injected");
+});
+
+test("runner: a cached npx answer never shadows a capable local xgrep installed later", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  makeRealRunner({}, { spawnSync: fakeSpawn(["npx"]).spawnSync, cacheFile, notify: () => {} })("xgrep", ["scan"], 1000);
+  assert.ok(existsSync(cacheFile));
+  const later = fakeSpawn(["xgrep", "npx"]); // the user installed xgrep since
+  makeRealRunner({}, { spawnSync: later.spawnSync, cacheFile, notify: () => {} })("xgrep", ["scan", "f"], 1000);
+  assert.ok(later.calls.some((c) => c[0] === "xgrep" && c[1] === "scan"));
+  assert.ok(later.calls.every((c) => c[0] !== "npx"));
+});
+
+test("runner: a failed npx fetch is remembered for a while, then retried", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  const t = { ms: 1_000_000 };
+  const notes = [];
+  const runner = (spawnSync) => makeRealRunner({}, { spawnSync, cacheFile, notify: (l) => notes.push(l), clock: fakeClock(t) });
+
+  assert.equal(runner(fakeSpawn([]).spawnSync)("xgrep", ["scan"], 1000).available, false); // offline: fails
+  const soon = fakeSpawn(["npx"]);
+  t.ms += 60_000; // a later hook process, a minute on
+  assert.equal(runner(soon.spawnSync)("xgrep", ["scan"], 1000).available, false);
+  assert.ok(soon.calls.every((c) => c[0] !== "npx"), "no npx retry inside the back-off window");
+
+  const later = fakeSpawn(["npx"]);
+  t.ms += 15 * 60_000; // past the window
+  assert.equal(runner(later.spawnSync)("xgrep", ["scan"], 1000).available, true);
+  assert.ok(later.calls.some((c) => c[0] === "npx"));
+});
+
+test("XGREP_NPX_CACHE lives in a per-user cache dir, not the shared temp dir", () => {
+  assert.ok(!XGREP_NPX_CACHE.startsWith(tmpdir()), XGREP_NPX_CACHE);
+  assert.match(XGREP_NPX_CACHE, /secure-guard/);
 });

@@ -20,9 +20,9 @@
 // yields "allow" — a guard must never wedge a session.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { join, dirname } from "node:path";
 import {
   normalizeVerdict, highConfidenceFindings, advisoryText, isScannable,
   iacScanKind, alsoCodeScan, combineAdvisories,
@@ -42,8 +42,14 @@ const ask = (reason) => ({ decision: "ask", reason });
 export const XGREP_NPX = ["npx", "-y", `${XGREP_NPM}@${XGREP_PIN}`];
 // Codex and Vibe start a new hook process for every tool call, so the npx
 // fallback's answer is remembered here rather than re-probed through npx each
-// time. Keyed by the pin: a new pin probes afresh.
-export const XGREP_NPX_CACHE = join(tmpdir(), `secure-guard-xgrep-${XGREP_PIN}.ok`);
+// time: a success for good, a failure (offline, say) for NPX_RETRY_MS so a
+// hook doesn't retry npx on every call. Keyed by the pin: a new pin probes
+// afresh. A capable local xgrep is always checked first, so this never hides
+// one installed later. It lives in the user's own cache dir — not the shared
+// temp dir, where another user could plant the path first.
+export const XGREP_NPX_CACHE = join(
+  process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "secure-guard", `xgrep-npx-${XGREP_PIN}.json`);
+export const NPX_RETRY_MS = 10 * 60 * 1000;
 
 // toEvent normalizes an agent's (toolName, toolInput) into the neutral event the
 // engine routes on. Tolerant of the field-name variants agents use for the path
@@ -69,6 +75,7 @@ export function makeRealRunner(env = process.env, deps = {}) {
   const spawn = deps.spawnSync ?? spawnSync;
   const cacheFile = deps.cacheFile ?? XGREP_NPX_CACHE;
   const notify = deps.notify ?? ((line) => process.stderr.write(line + "\n"));
+  const clock = deps.clock ?? Date;
   let xgrep;  // undefined = unresolved, null = unavailable, [argv…] = resolved
   let cnspec;
   const hasCommandFlag = (cmd) => {
@@ -87,15 +94,14 @@ export function makeRealRunner(env = process.env, deps = {}) {
     }
     // Nothing local is new enough: the pinned release via npx. Remembered
     // across hook processes; announced the first time it is fetched.
-    try {
-      if (readFileSync(cacheFile, "utf8").trim() === XGREP_NPX.join(" ")) { xgrep = XGREP_NPX; return xgrep; }
-    } catch { /* not cached yet */ }
+    const cached = readNpxCache(cacheFile);
+    if (cached?.ok) { xgrep = XGREP_NPX; return xgrep; }
+    if (cached?.failedAt && clock.now() - cached.failedAt < NPX_RETRY_MS) return xgrep; // backing off
     notify(`secure-guard: no xgrep with 'guard --command' installed; fetching ${XGREP_NPM}@${XGREP_PIN} ` +
       `from npm via npx (the scanner, not your data). Install it to skip this: npm i -g ${XGREP_NPM}`);
-    if (hasCommandFlag(XGREP_NPX)) {
-      xgrep = XGREP_NPX;
-      try { writeFileSync(cacheFile, XGREP_NPX.join(" ")); } catch { /* cache is best effort */ }
-    }
+    const ok = hasCommandFlag(XGREP_NPX);
+    if (ok) xgrep = XGREP_NPX;
+    writeNpxCache(cacheFile, ok ? { ok: true } : { failedAt: clock.now() });
     return xgrep;
   };
   const resolveCnspec = () => {
@@ -103,7 +109,7 @@ export function makeRealRunner(env = process.env, deps = {}) {
     cnspec = null;
     for (const cmd of [env.CNSPEC_PATH && [env.CNSPEC_PATH], ["cnspec"]].filter(Boolean)) {
       try {
-        const r = spawnSync(cmd[0], [...cmd.slice(1), "version"], { encoding: "utf8", timeout: 120000 });
+        const r = spawn(cmd[0], [...cmd.slice(1), "version"], { encoding: "utf8", timeout: 120000 });
         if (r.status === 0) { cnspec = cmd; break; }
       } catch { /* next */ }
     }
@@ -112,9 +118,27 @@ export function makeRealRunner(env = process.env, deps = {}) {
   return (which, args, timeout) => {
     const cmd = which === "xgrep" ? resolveXgrep() : resolveCnspec();
     if (!cmd) return { available: false, stdout: "" };
-    const r = spawnSync(cmd[0], [...cmd.slice(1), ...args], { encoding: "utf8", timeout, maxBuffer: 64 << 20 });
+    const r = spawn(cmd[0], [...cmd.slice(1), ...args], { encoding: "utf8", timeout, maxBuffer: 64 << 20 });
     return { available: true, stdout: r.stdout ?? "", status: r.status };
   };
+}
+
+// The npx cache is best effort both ways: unreadable or malformed means "not
+// cached", and a failed write just means the next process probes again.
+function readNpxCache(file) {
+  try {
+    const v = JSON.parse(readFileSync(file, "utf8"));
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeNpxCache(file, value) {
+  try {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    writeFileSync(file, JSON.stringify(value), { mode: 0o600 });
+  } catch { /* best effort */ }
 }
 
 function scanCode(run, filePath, content) {
