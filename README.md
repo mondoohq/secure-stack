@@ -15,19 +15,6 @@ over them for an agent:
 Compatible with Claude Code, Codex, Gemini CLI, Cursor, and more; skills follow the standardized
 [Agent Skills](https://agentskills.io/home) format.
 
-> [!NOTE]
-> **Looking for the MQL skill?** It lives in the cnspec repository, at
-> [`mondoohq/cnspec/skills`](https://github.com/mondoohq/cnspec/tree/main/skills),
-> next to the policy content it documents. `mondoo-mql` was mirrored here until it
-> fell behind the maintained copy, so it has been removed rather than left to drift
-> further. Install the current skills from cnspec:
->
-> ```shell
-> /plugin marketplace add mondoohq/cnspec
-> /plugin install mql@cnspec-skills
-> /plugin install policy-graph@cnspec-skills
-> ```
-
 > [!TIP]
 > If your agent doesn't support skills, you can use [`agents/SKILLS.md`](agents/SKILLS.md) directly as a fallback — it's a generated bundle of the skill instructions. To work *on* this repo, an agent should read the root [`AGENTS.md`](AGENTS.md) ([agents.md](https://agents.md/) convention).
 
@@ -241,6 +228,21 @@ claude plugin update <skill>@secure-stack
 > version that doesn't move leaves everyone who installed the skill on old
 > content indefinitely. `./scripts/publish.sh --check` fails if any manifest's
 > version drifts from the root, and CI runs it on every pull request.
+
+## Looking for the MQL skill?
+
+> [!NOTE]
+> The MQL skill lives in the cnspec repository, at
+> [`mondoohq/cnspec/skills`](https://github.com/mondoohq/cnspec/tree/main/skills),
+> next to the policy content it documents. `mondoo-mql` was mirrored here until it
+> fell behind the maintained copy, so it has been removed rather than left to drift
+> further. Install the current skills from cnspec:
+>
+> ```shell
+> /plugin marketplace add mondoohq/cnspec
+> /plugin install mql@cnspec-skills
+> /plugin install policy-graph@cnspec-skills
+> ```
 
 ## License
 
