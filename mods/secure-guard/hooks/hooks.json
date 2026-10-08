@@ -1,0 +1,4 @@
+{
+  "description": "secure-guard: xgrep shell + code review and cnspec IaC policy checks on an agent's tool calls",
+  "modules": ["./secure-guard.mjs"]
+}

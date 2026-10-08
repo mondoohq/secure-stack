@@ -1,0 +1,34 @@
+name: skillcheck validate
+
+# Validate this repository against the Agent Skills (agentskills.io) and AGENTS.md
+# (agents.md) specifications using Mondoo's skillcheck. It runs an embedded MQL
+# policy — every skill's name is a lowercase slug matching its directory and has a
+# valid-length description, a root AGENTS.md exists, and marketplace.json lists
+# plugins — and exits non-zero if any check fails.
+#
+# Requires @mondoohq/skillcheck >= v0.3.0 (the release that adds the `validate`
+# subcommand). npx resolves `latest`, which is >= v0.3.0.
+
+on:
+  pull_request:
+    paths:
+      - "skills/**"
+      - "AGENTS.md"
+      - ".claude-plugin/marketplace.json"
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate against Agent Skills + AGENTS.md specs
+        run: npx -y @mondoohq/skillcheck validate .

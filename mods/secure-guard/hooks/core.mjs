@@ -1,0 +1,227 @@
+// Copyright (c) Mondoo, Inc.
+// SPDX-License-Identifier: Apache-2.0
+//
+// secure-guard core — the agent-neutral logic shared by every adapter
+// (the Claude mod, the Codex/Vibe hook command, the Pi/opencode extensions).
+//
+// Everything here is PURE: parsing, filtering, routing, version comparison,
+// cnspec bundle mapping, and advisory formatting. There is NO I/O and no
+// dependency on any agent API — each adapter spawns xgrep/cnspec itself (with
+// its own runtime) and calls these functions to decide and format. That keeps
+// one implementation of "what counts as a finding and how we phrase it" across
+// all agents.
+//
+// The two engines this drives:
+//   xgrep  — secrets/PII + dangerous-command guard (via `xgrep guard --command`,
+//            parsed by normalizeVerdict) AND OWASP Top 10 code review (via
+//            `xgrep scan --json`, filtered by highConfidenceFindings).
+//   cnspec — IaC policy checks (via `cnspec scan … -o sarif`, parsed by
+//            sarifFindings), with the bundle mapping in cnspecBundlesFor.
+
+// ─── Shared constants ────────────────────────────────────────────────────────
+
+export const XGREP_NPM = "@mondoohq/xgrep"; // public package — the fetch/install source
+// Pinned to a tested release so a session can't pull up an unvetted build.
+export const XGREP_PIN = "0.80.0";
+// Minimum xgrep the guard needs: `xgrep guard --command` landed in 0.78.0.
+export const XGREP_MIN = "0.78.0";
+
+export const CNSPEC_INSTALL_URL = "https://mondoo.com/docs/cnspec/install";
+
+// cnspec runs a policy only when one of its filters matches the IaC asset. The
+// public content bundles are platform/provider scoped, so the guard loads a set
+// per target (cnspec accepts multiple `-f`; non-matching bundles are skipped).
+// `terraform-deprecations` matches ANY terraform-hcl, so it guarantees at least
+// one policy runs and no "asset doesn't support any policies" error.
+export const CNSPEC_CONTENT_RAW = "https://raw.githubusercontent.com/mondoohq/cnspec/main/content";
+export const CNSPEC_BUNDLES = {
+  terraform: ["terraform-deprecations", "mondoo-aws-security", "mondoo-azure-security", "mondoo-gcp-security"],
+  docker: ["mondoo-dockerfile-security", "mondoo-dockerfile-best-practices"],
+  k8s: ["mondoo-kubernetes-security", "mondoo-kubernetes-best-practices"],
+  cloudformation: ["mondoo-aws-security"],
+};
+
+// Inline review skips files that are not code worth scanning.
+export const REVIEW_SKIP_EXT = new Set([
+  ".md", ".markdown", ".txt", ".rst", ".json", ".lock", ".sum", ".mod",
+  ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".tsv", ".svg", ".png",
+  ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ico", ".lockb",
+]);
+const REVIEW_SKIP_DIRS = new Set(["node_modules", ".git", "vendor", "dist"]);
+const REVIEW_MAX_SHOWN = 10;
+
+// ─── xgrep: version resolution helpers ───────────────────────────────────────
+
+// parseVersion pulls an x.y.z out of `xgrep version` output; null if absent.
+export function parseVersion(out) {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(out ?? ""));
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : null;
+}
+
+// meetsMin reports whether a parsed version is >= XGREP_MIN. An unparseable
+// version counts as too old, so the guard prefers a known-good release.
+export function meetsMin(version) {
+  return version != null && cmpSemver(version, XGREP_MIN) >= 0;
+}
+
+// cmpSemver compares two x.y.z strings and returns -1, 0, or 1.
+export function cmpSemver(a, b) {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+// ─── xgrep: shell verdict ────────────────────────────────────────────────────
+
+// normalizeVerdict maps a `xgrep guard --command` JSON verdict
+// ({decision, summary, findings[]}) to { decision, summary, lines }.
+export function normalizeVerdict(v) {
+  const findings = Array.isArray(v?.findings) ? v.findings : [];
+  const decision = v?.decision ?? (findings.length ? "ask" : "allow");
+  const summary = v?.summary ?? (findings.length ? `${findings.length} finding(s)` : "");
+  const lines = findings.map((f) => `${(f.severity ?? "").toUpperCase().padEnd(8)} ${f.title ?? f.rule ?? "finding"}`);
+  return { decision, summary, lines };
+}
+
+// ─── xgrep: code review ──────────────────────────────────────────────────────
+
+// highConfidenceFindings: given a parsed `xgrep scan --json` document, return the
+// high-confidence security findings — filtered on the rule's `confidence` (HIGH),
+// dropping test/fixture scope.
+export function highConfidenceFindings(doc) {
+  const results = Array.isArray(doc?.results) ? doc.results : [];
+  return results
+    .filter((m) => m?.extra?.confidence === "HIGH" && m?.extra?.scope !== "test")
+    .map((m) => ({
+      rule: m.check_id ?? "finding",
+      title: m.extra?.title ?? m.check_id ?? "finding",
+      line: m.start?.line ?? 0,
+      message: firstSentence(m.extra?.message ?? ""),
+    }));
+}
+
+export function advisoryText(file, findings) {
+  const head = `File written. xgrep flagged ${findings.length} high-confidence security ` +
+    `issue(s) in ${file} that you should fix before continuing:`;
+  const shown = findings.slice(0, REVIEW_MAX_SHOWN);
+  const body = shown
+    .map((f) => `  • ${f.title} (${f.rule}), line ${f.line}: ${f.message}`)
+    .join("\n");
+  const more = findings.length > shown.length
+    ? `\n  … and ${findings.length - shown.length} more.`
+    : "";
+  return `${head}\n${body}${more}`;
+}
+
+// isScannable keeps inline review on actual code: no docs/data/lockfiles, no
+// vendored or VCS trees, no dotfiles. xgrep decides the language from here.
+export function isScannable(file) {
+  const segs = file.split(/[\\/]/); // tolerate both / and \ (Windows paths)
+  const base = segs[segs.length - 1] ?? "";
+  if (base === "" || base.startsWith(".")) return false;
+  if (segs.some((s) => REVIEW_SKIP_DIRS.has(s))) return false;
+  const dot = base.lastIndexOf(".");
+  const ext = dot > 0 ? base.slice(dot).toLowerCase() : "";
+  if (REVIEW_SKIP_EXT.has(ext)) return false;
+  return true;
+}
+
+// firstSentence trims a long message to its first sentence.
+export function firstSentence(msg) {
+  const s = String(msg).trim();
+  const end = s.indexOf(". ");
+  return end > 0 ? s.slice(0, end + 1) : s;
+}
+
+// ─── cnspec: IaC routing, bundles, SARIF ─────────────────────────────────────
+
+// iacScanKind maps a written file to a cnspec scan target, or null. Terraform
+// and Dockerfile are unambiguous by path; k8s and CloudFormation YAML/JSON are
+// classified from content (available on Write).
+export function iacScanKind(file, content) {
+  const base = (file.split(/[\\/]/).pop() ?? "").toLowerCase();
+  if (base === "") return null;
+  if (base.endsWith(".tf") || base.endsWith(".tf.json")) return "terraform";
+  if (base === "dockerfile" || base === "containerfile" || base.endsWith(".dockerfile")) return "docker";
+  if (base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".json")) {
+    return classifyYaml(content);
+  }
+  return null;
+}
+
+// classifyYaml tells a Kubernetes manifest from a CloudFormation template by
+// content; null when it is neither (or content is unavailable).
+export function classifyYaml(content) {
+  if (typeof content !== "string" || content === "") return null;
+  if (/AWSTemplateFormatVersion|^\s*Resources:\s*$/m.test(content) && /\bType:\s*["']?AWS::/.test(content)) return "cloudformation";
+  if (/^\s*apiVersion:\s/m.test(content) && /^\s*kind:\s/m.test(content)) return "k8s";
+  return null;
+}
+
+// cnspecScanArgs builds the `cnspec scan …` argv for one IaC file. The docker
+// provider scans a Dockerfile as `scan docker file <path>`; the others take the
+// path directly. --incognito keeps the scan local and skips loading the Mondoo
+// Platform config, so a broken/absent credential never breaks the IaC guard.
+export function cnspecScanArgs(kind, file, bundles) {
+  const target = kind === "docker" ? ["docker", "file", file] : [kind, file];
+  const policy = (Array.isArray(bundles) ? bundles : []).flatMap((b) => ["-f", b]);
+  return ["scan", ...target, ...policy, "--incognito", "-o", "sarif"];
+}
+
+// cnspecBundlesFor resolves the `-f` policy sources for an IaC kind, in
+// precedence: CNSPEC_POLICY_BUNDLE (comma-separated override) → a local cnspec
+// content checkout (contentDir) → the public raw content URLs.
+export function cnspecBundlesFor(kind, override, contentDir) {
+  if (override && override.trim()) {
+    return override.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  const names = CNSPEC_BUNDLES[kind] || [];
+  if (contentDir && contentDir.trim()) {
+    const base = contentDir.trim().replace(/\/+$/, "");
+    return names.map((n) => `${base}/${n}.mql.yaml`);
+  }
+  return names.map((n) => `${CNSPEC_CONTENT_RAW}/${n}.mql.yaml`);
+}
+
+// sarifFindings extracts failed policy checks from a SARIF document. It drops
+// cnspec's `asset-error` results (the scan could not evaluate → stay quiet) and
+// keeps only FAILED checks (cnspec marks passes kind:"pass"/level:"none").
+export function sarifFindings(doc) {
+  const runs = Array.isArray(doc?.runs) ? doc.runs : [];
+  const out = [];
+  for (const run of runs) {
+    for (const res of Array.isArray(run?.results) ? run.results : []) {
+      const rule = res?.ruleId ?? "policy-check";
+      if (rule === "asset-error") continue;
+      const failed = res?.kind === "fail" ||
+        (res?.kind == null && ["error", "warning"].includes(res?.level));
+      if (!failed) continue;
+      // cnspec encodes "<title>: FAIL · <sev> · score n/100" — keep the title.
+      const title = String(res?.message?.text ?? "").split(/:\s+(?:PASS|FAIL)\b/i)[0].trim();
+      out.push({
+        rule,
+        level: res?.level ?? "warning",
+        severity: res?.properties?.severity ?? "",
+        message: firstSentence(title),
+      });
+    }
+  }
+  return out;
+}
+
+export function iacAdvisoryText(file, kind, findings) {
+  const head = `File written. cnspec policy found ${findings.length} issue(s) in ${file} ` +
+    `(${kind}) to fix before continuing:`;
+  const shown = findings.slice(0, REVIEW_MAX_SHOWN);
+  const body = shown
+    .map((f) => `  • ${f.severity ? `[${f.severity}] ` : ""}${f.message} (${f.rule})`)
+    .join("\n");
+  const more = findings.length > shown.length
+    ? `\n  … and ${findings.length - shown.length} more.`
+    : "";
+  return `${head}\n${body}${more}`;
+}

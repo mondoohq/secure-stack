@@ -1,0 +1,19 @@
+{
+  "name": "secure-cloud",
+  "version": "1.0.1",
+  "description": "Audit cloud account security posture — scan AWS, Azure, GCP, and Kubernetes against CIS foundations and Mondoo cloud policies with cnspec",
+  "author": {
+    "name": "Mondoo"
+  },
+  "repository": "https://github.com/mondoohq/secure-stack",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mondoo",
+    "security",
+    "posture",
+    "cloud",
+    "cspm",
+    "cis",
+    "cnspec"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "fix-findings",
+  "version": "1.0.1",
+  "description": "Fix xgrep security findings and prove each fix holds — one finding or a whole set (or the triage-confirmed true positives) — through the verify/apply harness",
+  "author": {
+    "name": "Mondoo"
+  },
+  "repository": "https://github.com/mondoohq/secure-stack",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mondoo",
+    "security",
+    "remediation",
+    "autofix",
+    "sast",
+    "verify-apply",
+    "xgrep"
+  ]
+}

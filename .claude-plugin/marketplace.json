@@ -1,49 +1,73 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "mondoo-skills",
+  "name": "secure-stack",
   "owner": {
     "name": "Mondoo"
   },
   "metadata": {
-    "description": "xgrep security skills for Claude Code and other agents",
+    "description": "Tools AI coding agents use to secure your stack: code with xgrep, posture and policy with cnspec",
     "version": "1.0.1"
   },
   "plugins": [
     {
-      "name": "xgrep-inspect",
-      "source": "./skills/xgrep-inspect",
+      "name": "understand-code",
+      "source": "./skills/understand-code",
       "skills": "./",
-      "description": "Navigate and understand source code using xgrep's AST-powered code intelligence"
-    },
-    {
-      "name": "xgrep-rule-creator",
-      "source": "./skills/xgrep-rule-creator",
-      "skills": "./",
-      "description": "Create custom xgrep rules for detecting security vulnerabilities and code patterns with test-first methodology"
-    },
-    {
-      "name": "xgrep-triage",
-      "source": "./skills/xgrep-triage",
-      "skills": "./",
-      "description": "Investigate and classify xgrep scan findings using code graph analysis"
-    },
-    {
-      "name": "xgrep-remediate",
-      "source": "./skills/xgrep-remediate",
-      "skills": "./",
-      "description": "Fix a confirmed xgrep finding safely using the verify/apply harness — apply deterministic fixes, author and verify assisted fixes against the fix contract, and surface advisory guidance"
-    },
-    {
-      "name": "xgrep-fix",
-      "source": "./skills/xgrep-fix",
-      "skills": "./",
-      "description": "Fix a whole set of xgrep findings — or just the triage-confirmed true positives in a findings.json — in one pass through the verify/apply harness"
+      "description": "Understand an unfamiliar codebase before you change it — map structure, find definitions/callers, trace call chains, and assess a change's blast radius with xgrep's AST code graph"
     },
     {
       "name": "secure-coding",
       "source": "./skills/secure-coding",
       "skills": "./",
-      "description": "Secure coding guidance for AI agents - proactively avoid generating vulnerable code patterns across 7 languages"
+      "description": "Write it safely — avoid vulnerable patterns across 7 languages, aligned to OWASP Top 10:2025 and the OWASP Top 10 for LLM & GenAI 2025"
+    },
+    {
+      "name": "secure-pipeline",
+      "source": "./skills/secure-pipeline",
+      "skills": "./",
+      "description": "Verify and enforce security before code ships — scan code (SAST/SCA/secrets) with xgrep and IaC/config with cnspec, then triage and fix, mapped to OWASP Top 10:2025 and the OWASP Top 10 for LLM & GenAI 2025"
+    },
+    {
+      "name": "triage-findings",
+      "source": "./skills/triage-findings",
+      "skills": "./",
+      "description": "Decide whether a security finding is real — classify xgrep scan results as true or false positives by tracing dataflow and call chains with the code graph"
+    },
+    {
+      "name": "fix-findings",
+      "source": "./skills/fix-findings",
+      "skills": "./",
+      "description": "Fix xgrep security findings and prove each fix holds — one finding or a whole set (or the triage-confirmed true positives) — through the verify/apply harness"
+    },
+    {
+      "name": "author-detections",
+      "source": "./skills/author-detections",
+      "skills": "./",
+      "description": "Catch a pattern nothing else catches — author a custom, tested xgrep/Semgrep detection rule (including taint-mode dataflow), or port a rule to new languages"
+    },
+    {
+      "name": "secure-os",
+      "source": "./skills/secure-os",
+      "skills": "./",
+      "description": "Audit and harden operating systems and network devices — scan a Linux/macOS/Windows host, container image, or network device against CIS/vendor benchmarks with cnspec"
+    },
+    {
+      "name": "secure-cloud",
+      "source": "./skills/secure-cloud",
+      "skills": "./",
+      "description": "Audit cloud account security posture — scan AWS, Azure, GCP, and Kubernetes against CIS foundations and Mondoo cloud policies with cnspec"
+    },
+    {
+      "name": "secure-saas",
+      "source": "./skills/secure-saas",
+      "skills": "./",
+      "description": "Audit SaaS and identity-provider security posture — scan GitHub, GitLab, Okta, Google Workspace, Microsoft 365, Slack, Atlassian, and Snowflake with cnspec"
+    },
+    {
+      "name": "secure-ai-services",
+      "source": "./skills/secure-ai-services",
+      "skills": "./",
+      "description": "Secure AI services and AI tooling — scan OpenAI, Anthropic, vLLM, Databricks AI, and vector stores with cnspec, and govern approved AI agents/IDE-extensions/MCP servers, mapped to the OWASP LLM Top 10"
     }
   ]
 }

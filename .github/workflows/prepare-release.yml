@@ -301,10 +301,10 @@ jobs:
             printf '## Merging this PR publishes the release\n\n'
             printf 'No tag push needed — `release.yml` sees the version change on `main`, '
             printf 'mints the `v%s` tag and publishes the GitHub Release from `CHANGELOG.md`.\n\n' "$NEXT"
-            printf 'Installed users then get it with `claude plugin update <skill>@mondoo-skills`.\n\n'
+            printf 'Installed users then get it with `claude plugin update <skill>@secure-stack`.\n\n'
             printf '## What changed here\n\n'
             printf -- '- every manifest stamped to `%s` (root, Cursor, Gemini, and each skill)\n' "$NEXT"
-            printf -- '- `CHANGELOG.md` updated; `agents/AGENTS.md` and the README table regenerated\n\n'
+            printf -- '- `CHANGELOG.md` updated; `agents/SKILLS.md` and the README table regenerated\n\n'
             printf 'Edit the notes in this PR if you want them worded differently — '
             printf 'the Release page is generated from `CHANGELOG.md`, so what you approve is what ships.\n\n'
             printf '> [!NOTE]\n'

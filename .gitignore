@@ -13,3 +13,6 @@ Thumbs.db
 *.tmp
 *.bak
 .claude/
+
+# scan caches from mod scenarios
+.xgrep/
