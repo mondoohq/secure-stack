@@ -51,7 +51,7 @@ import {
   parseVersion, meetsMin, normalizeVerdict,
   highConfidenceFindings, advisoryText, isScannable,
   iacScanKind, cnspecScanArgs, cnspecBundlesFor, sarifFindings, iacAdvisoryText,
-  extractJsonObject,
+  parseJsonObject,
 } from "./core.mjs";
 
 const DOCS_URL = "https://mondoo.com/docs/xgrep/ai-agents/guard-hooks"; // what the guard does
@@ -410,11 +410,8 @@ async function reviewIac($, e, r, kind) {
 async function cnspecScan($, b, kind, file) {
   const bundles = cnspecBundlesFor(kind, $.env.get("CNSPEC_POLICY_BUNDLE") || "", $.env.get("CNSPEC_CONTENT_DIR") || "");
   const run = await $.process.run([...b.cmd, ...cnspecScanArgs(kind, file, bundles)], { timeoutMs: IAC_TIMEOUT_MS });
-  const obj = extractJsonObject(run.stdout ?? "");
-  if (!obj) return [];
-  let doc;
-  try { doc = JSON.parse(obj); } catch { return []; }
-  return sarifFindings(doc);
+  const doc = parseJsonObject(run.stdout ?? "");
+  return doc ? sarifFindings(doc) : [];
 }
 
 // ─── Drawing (pane / band) ───────────────────────────────────────────────────

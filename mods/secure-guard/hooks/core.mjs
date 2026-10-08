@@ -213,6 +213,15 @@ export function extractJsonObject(s) {
   return null; // unbalanced — no complete object
 }
 
+// parseJsonObject extracts and parses the first top-level JSON object in s,
+// returning the parsed value or null. It NEVER throws, so a cnspec call site
+// doesn't rely on a distant outer try/catch to stay fail-open.
+export function parseJsonObject(s) {
+  const obj = extractJsonObject(s);
+  if (obj == null) return null;
+  try { return JSON.parse(obj); } catch { return null; }
+}
+
 // sarifFindings extracts failed policy checks from a SARIF document. It drops
 // cnspec's `asset-error` results (the scan could not evaluate → stay quiet) and
 // keeps only FAILED checks (cnspec marks passes kind:"pass"/level:"none").

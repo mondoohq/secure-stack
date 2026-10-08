@@ -22,6 +22,7 @@ import {
   cnspecScanArgs,
   cnspecBundlesFor,
   extractJsonObject,
+  parseJsonObject,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -235,4 +236,15 @@ test("extractJsonObject bounds both the prefix and the suffix", () => {
   // no object / unbalanced → null (caller returns [] → fail open)
   assert.equal(extractJsonObject("no json here"), null);
   assert.equal(extractJsonObject('{"a":1'), null);
+});
+
+// parseJsonObject: extract + parse in one step, never throwing, so both cnspec
+// call sites (the mod and the shared engine) stay fail-open without a bare
+// JSON.parse relying on a distant outer catch.
+test("parseJsonObject returns the object or null, never throws", () => {
+  assert.deepEqual(parseJsonObject('{"runs":[]} trailing log'), { runs: [] });
+  assert.deepEqual(parseJsonObject("→ log\n{\"a\":1}\ndone"), { a: 1 });
+  assert.equal(parseJsonObject("no json"), null);        // no object
+  assert.equal(parseJsonObject('{"a":1'), null);          // unbalanced
+  assert.equal(parseJsonObject("{not valid json}"), null); // balanced but invalid
 });
