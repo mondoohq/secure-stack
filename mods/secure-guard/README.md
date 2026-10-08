@@ -71,6 +71,38 @@ Other policy sources, in precedence order:
 A custom bundle needs policy **filters that match the IaC platform** you're scanning
 (`terraform-hcl`, `dockerfile`, `k8s`, `cloudformation`), or cnspec has nothing to run.
 
+## Local by design
+
+Every check runs **on your machine**. xgrep scans each command and file itself (no service in
+between), and cnspec evaluates IaC files locally. Your commands and code are never uploaded,
+and nothing is evaluated server-side. That matters for two reasons:
+
+- **Fast**: there's no network round-trip per tool call. A scan is a local pass, so guarding
+  every command and write doesn't add server latency to the session.
+- **Private**: the code being scanned never leaves your machine.
+
+What does cross the network is listed below. The guard announces the xgrep fetch and the
+policy download in the session the first time each happens:
+
+| What | When | Direction |
+|------|------|-----------|
+| the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.78 is installed | down: the scanner, not your data |
+| cnspec policy bundles, from [github.com/mondoohq/cnspec](https://github.com/mondoohq/cnspec/tree/main/content) | on an IaC scan, unless `CNSPEC_CONTENT_DIR` points at a local copy | down: policies only |
+| cnspec providers (e.g. its Terraform provider) | on an IaC scan, when cnspec's own `--auto-update` (on by default) finds one missing or outdated | down: cnspec's plugins |
+| scan results to your Mondoo Platform space | only with `CNSPEC_USE_PLATFORM=1` | up, by your choice |
+
+Installing xgrep (`npm i -g @mondoohq/xgrep`) and setting `CNSPEC_CONTENT_DIR` removes the
+first two. The provider check is cnspec's own behavior and follows its `--auto-update` setting.
+
+## Trust
+
+A mod runs with your permissions inside Claude Code. It can read files, start processes
+(including the xgrep download above), and make network requests. Review it before you
+install it: `claude plugin validate mods/secure-guard` lists every event it hooks, every
+capability it uses (`$.process`, `$.fs`, `$.http`, …), and every environment variable it
+reads. This mod only reaches outside its own code through those capabilities, so that list is
+the complete picture. Install mods only from sources you trust.
+
 ## Status in a session
 
 Run `/secure-guard` to see how it's reaching each engine (xgrep: daemon / in-process /
