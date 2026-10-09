@@ -11,7 +11,7 @@
 //   Write → `xgrep scan` code / `cnspec scan` IaC (OWASP Top 10 / policy)
 //
 // Pre-tool, fail-open (a missing/old/erroring scanner never throws). Requires
-// node + xgrep (≥ 0.78, PATH or XGREP_PATH); cnspec optional for the IaC leg.
+// node + xgrep (≥ 0.84, PATH or XGREP_PATH); cnspec optional for the IaC leg.
 //
 // NOTE: opencode moved sst→anomalyco and its v2 docs are in flux — confirm the
 // hook name (`tool.execute.before`) and where the tool args live against your

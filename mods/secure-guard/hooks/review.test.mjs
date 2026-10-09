@@ -143,9 +143,11 @@ test("cmpSemver orders versions", () => {
   assert.equal(cmpSemver("0.9.0", "0.10.0"), -1); // numeric, not lexical
 });
 
-test("meetsMin gates on the 0.78.0 floor (guard --command)", () => {
-  assert.equal(meetsMin("0.80.0"), true);
-  assert.equal(meetsMin("0.78.0"), true); // the floor itself
+test("meetsMin gates on the 0.84.0 floor (every --command leg, the new rules)", () => {
+  assert.equal(meetsMin("0.85.0"), true);
+  assert.equal(meetsMin("0.84.0"), true); // the floor itself
+  assert.equal(meetsMin("0.83.0"), false);
+  assert.equal(meetsMin("0.80.0"), false);
   assert.equal(meetsMin("0.77.0"), false); // predates --command
   assert.equal(meetsMin("0.65.0"), false);
   assert.equal(meetsMin(null), false); // unparseable → treat as too old

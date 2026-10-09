@@ -9,7 +9,7 @@
 //   node integrations/shared/pipeline-scenario.mjs
 //   XGREP_PATH=/path/to/xgrep CNSPEC_PATH=/path/to/cnspec node integrations/shared/pipeline-scenario.mjs
 //
-// It resolves a CAPABLE xgrep (needs `guard --command`, ≥ 0.78) and passes it to
+// It resolves a CAPABLE xgrep (needs `guard --command` with every scan leg, ≥ 0.84) and passes it to
 // the hook via XGREP_PATH so the child doesn't re-download. The IaC leg is gated
 // on cnspec being present.
 

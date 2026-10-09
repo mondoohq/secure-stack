@@ -31,7 +31,7 @@ idempotent; delete the marked block to uninstall.
 ## Requirements
 
 - **node** on `PATH`.
-- **xgrep** on `PATH` (or `XGREP_PATH`), new enough for `guard --command` (≥ 0.78) —
+- **xgrep** on `PATH` (or `XGREP_PATH`), new enough for `guard --command` (≥ 0.84) —
   [xgrep.ai](https://xgrep.ai) / [docs](https://mondoo.com/docs/xgrep) / the
   `@mondoohq/xgrep` npm package. If none new enough is installed, the hook fetches the pinned release from the
   `@mondoohq/xgrep` npm package via `npx` (the scanner, not your data), says so on stderr,

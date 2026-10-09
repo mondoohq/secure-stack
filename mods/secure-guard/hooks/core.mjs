@@ -25,9 +25,14 @@
 
 export const XGREP_NPM = "@mondoohq/xgrep"; // public package — the fetch/install source
 // Pinned to a tested release so a session can't pull up an unvetted build.
-export const XGREP_PIN = "0.80.0";
-// Minimum xgrep the guard needs: `xgrep guard --command` landed in 0.78.0.
-export const XGREP_MIN = "0.78.0";
+export const XGREP_PIN = "0.84.0";
+// Minimum xgrep the guard needs. 0.84.0 is where `guard --command` runs every
+// scan leg the hook runs (secrets and PII in commands, referenced scripts,
+// inline code — xgrep#3233), gains the env-var-secret, env-dump and destructive
+// command rules (#3235), honors rule categories (#3236/#3237), and reports
+// updates as JSON (#3238). Older builds run, but miss what the docs promise, so
+// the guard uses the pinned release instead and offers /secure-guard update.
+export const XGREP_MIN = "0.84.0";
 
 export const CNSPEC_INSTALL_URL = "https://mondoo.com/docs/cnspec/install";
 
