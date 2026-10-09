@@ -1,0 +1,7 @@
+# URLs excluded from link checking (regular expressions, one per line)
+
+# Skill files reference {baseDir}/..., a placeholder substituted at runtime
+(%7B|\{)baseDir(%7D|\})
+
+# npmjs.com returns 403 to automated clients
+^https://www\.npmjs\.com/
