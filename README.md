@@ -74,6 +74,11 @@ engine before it lands: **xgrep** for secrets/PII + dangerous commands (shell) a
 CloudFormation). The routing and finding logic lives once in a shared core/engine; each agent
 gets a thin adapter under [`integrations/`](integrations/).
 
+![secure-guard's inline xgrep review catching a SQL injection that Claude then fixes](mods/secure-guard/demo-inline-review.gif)
+
+<sub>Inline code review: asked only for a <code>/health</code> endpoint, Claude edits <code>app.py</code>,
+xgrep flags the SQL injection already in <code>/user</code>, and Claude fixes it in the same turn.</sub>
+
 Every scan runs on your machine: commands and code are never uploaded, and the only downloads
 are the scanner and public policies, each announced when it happens
 ([details](mods/secure-guard/README.md#local-by-design)).

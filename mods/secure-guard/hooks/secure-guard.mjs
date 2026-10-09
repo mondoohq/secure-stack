@@ -449,7 +449,18 @@ async function codeAdvisory($, file) {
   const b = await ensureBackend($);
   if (b.mode === "unavailable") return null; // scanner not here — stay quiet (fail open)
   const findings = await scanFile($, b, file);
-  return findings.length ? `${advisoryText(file, findings)}\n${FP_HINT}` : null;
+  if (!findings.length) return null;
+  announceFindings($, "xgrep", findings.length, file);
+  return `${advisoryText(file, findings)}\n${FP_HINT}`;
+}
+
+// announceFindings tells the user what the agent was just handed: advisories
+// reach the model as `context`, which the transcript doesn't show, so without
+// this the user sees the agent change code they didn't ask about with no
+// visible reason.
+function announceFindings($, engine, count, file) {
+  const base = String(file).split(/[\\/]/).pop();
+  $.ui.toast(`${engine} found ${count} issue${count === 1 ? "" : "s"} in ${base} — sent to Claude`);
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -573,7 +584,9 @@ async function iacAdvisory($, file, kind) {
   const b = await ensureCnspec($);
   if (b.mode !== "ok") return null; // cnspec not installed — stay quiet
   const findings = await cnspecScan($, b, kind, file);
-  return findings.length ? iacAdvisoryText(file, kind, findings) : null;
+  if (!findings.length) return null;
+  announceFindings($, "cnspec", findings.length, file);
+  return iacAdvisoryText(file, kind, findings);
 }
 
 async function cnspecScan($, b, kind, file) {

@@ -34,7 +34,7 @@ type Env = Record<string, string | undefined>;
 // fakeEngine registers the bottom hooks: files, env, processes, and the tool.
 // `files` is what $.fs.read sees; `scan` answers `xgrep scan` and `cnspec` the
 // cnspec scan (undefined = that scanner is not installed). Returns the argv log.
-function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; scan?: string; cnspec?: string }) {
+function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; scan?: string; cnspec?: string; toasts?: string[] }) {
   const runs: string[][] = [];
   on("env.get", ($: any, e: any) => ({ value: opts.env?.[e.name] }));
   on("fs.read", ($: any, e: any) => {
@@ -58,7 +58,7 @@ function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; 
     }
     return missing();
   });
-  on("ui.toast", () => ({ value: undefined }));
+  on("ui.toast", ($: any, e: any) => { opts.toasts?.push(String(e.text ?? "")); return { value: undefined }; });
   on("ui.log", () => ({ value: undefined }));
   on("tool.call", { tool: ["Write", "Edit", "MultiEdit"] }, ($: any, e: any) => ({
     result: { filePath: e.file_path, oldString: "", newString: "", originalFile: "", structuredPatch: [], userModified: false, replaceAll: false },
@@ -291,4 +291,18 @@ test("code advisories point the agent at the false-positive report", async ($, o
   fakeEngine(on, { scan: XGREP_SECRET });
   const r = await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
   expect(advisories(r)).toContain("report_false_positive");
+});
+
+test("findings handed to the agent are announced to the user with a toast", async ($, on) => {
+  const toasts: string[] = [];
+  fakeEngine(on, { scan: XGREP_SECRET, toasts });
+  await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
+  expect(toasts.some((t) => t.includes("xgrep found 1 issue in app.py"))).toBe(true);
+});
+
+test("a clean file raises no toast", async ($, on) => {
+  const toasts: string[] = [];
+  fakeEngine(on, { toasts });
+  await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
+  expect(toasts.length).toBe(0);
 });
