@@ -90,13 +90,40 @@ export function cmpSemver(a, b) {
 // ─── xgrep: shell verdict ────────────────────────────────────────────────────
 
 // normalizeVerdict maps a `xgrep guard --command` JSON verdict
-// ({decision, summary, findings[]}) to { decision, summary, lines }.
+// ({decision, summary, findings[]}) to { decision, summary, lines, flagged }.
+//
+// `summary` is xgrep's own ready-made message, written for a hook that blocks
+// outright ("xgrep guard blocked this action … remove … and retry"); the
+// pre-tool adapters, which do block, pass it on. A guard that HOLDS the call
+// for the user must not echo it — nothing was blocked yet — so `lines` (one per
+// finding, for a list) and `flagged` (one line, for a sentence) are phrased
+// here from the structured findings instead.
 export function normalizeVerdict(v) {
   const findings = Array.isArray(v?.findings) ? v.findings : [];
   const decision = v?.decision ?? (findings.length ? "ask" : "allow");
   const summary = v?.summary ?? (findings.length ? `${findings.length} finding(s)` : "");
-  const lines = findings.map((f) => `${(f.severity ?? "").toUpperCase().padEnd(8)} ${f.title ?? f.rule ?? "finding"}`);
-  return { decision, summary, lines };
+  const named = findings.map(findingName);
+  const lines = findings.map((f, i) => {
+    const sev = String(f?.severity ?? "").trim().toUpperCase();
+    return sev ? `${sev} · ${named[i]}` : named[i];
+  });
+  const flagged = named.length
+    ? named.join("; ")
+    : firstLine(summary).replace(/[:.]+$/, "") || "a risky command";
+  return { decision, summary, lines, flagged };
+}
+
+// findingName is how one guard finding reads to a person: its title, then the
+// rule id that lets them (or the agent) look it up.
+function findingName(f) {
+  const title = String(f?.title ?? "").trim();
+  const rule = String(f?.rule ?? "").trim();
+  if (title && rule && rule !== title) return `${title} (${rule})`;
+  return title || rule || "finding";
+}
+
+function firstLine(s) {
+  return String(s ?? "").trim().split("\n")[0].trim();
 }
 
 // ─── xgrep: code review ──────────────────────────────────────────────────────

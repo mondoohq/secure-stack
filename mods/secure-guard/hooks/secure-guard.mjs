@@ -233,7 +233,7 @@ function denyResult(why, verdict) {
   return {
     deny:
       `xgrep guard held this command and did not run it: ${why}. ` +
-      `xgrep flagged: ${verdict.summary}. Do not retry it unless the user asks you to.`,
+      `xgrep flagged ${verdict.flagged}. Do not retry it unless the user asks you to.`,
   };
 }
 
@@ -479,14 +479,24 @@ async function cnspecScan($, b, kind, file) {
 // ─── Drawing (pane / band) ───────────────────────────────────────────────────
 
 function paneRows(v) {
-  return Math.min(24, 8 + (v.lines?.length ?? 0));
+  return Math.min(24, 6 + (v.lines?.length ?? 0));
 }
 
+// The pane says what it is doing — holding the call until you choose — and
+// lists what xgrep flagged in its own words (not xgrep's "blocked … retry"
+// summary, which is written for a hook that blocks outright).
 function draw(t, state) {
   const { Box, Text, Button } = t;
   const { verdict } = state;
-  const list = (verdict.lines ?? []).map((line, i) =>
-    Text({ key: `l${i}`, children: `  ${line}`, wrap: "truncate-end" })
+  const list = (verdict.lines?.length ? verdict.lines : [verdict.flagged]).map((line, i) =>
+    Text({
+      key: `l${i}`,
+      wrap: "truncate-end",
+      children: [
+        Text({ dimColor: true, children: i === 0 ? "Flagged  " : "         " }),
+        Text({ color: "red", bold: true, children: line }),
+      ],
+    })
   );
   const decide = (choice) => () => { if (state.decision === null) state.decision = choice; };
   return Box({
@@ -495,10 +505,12 @@ function draw(t, state) {
     borderColor: "yellow",
     paddingX: 1,
     children: [
-      Text({ key: "title", bold: true, color: "yellow", children: "⚠ xgrep guard" }),
+      Text({ key: "title", children: [
+        Text({ bold: true, color: "yellow", children: "⚠ xgrep guard " }),
+        Text({ dimColor: true, children: "held this command until you decide" }),
+      ] }),
       Text({ key: "cmd", children: [Text({ dimColor: true, children: "Command  " }), Text({ bold: true, children: state.command })], wrap: "truncate-end" }),
-      verdict.summary ? Text({ key: "sum", children: [Text({ dimColor: true, children: "xgrep    " }), Text({ color: "red", bold: true, children: verdict.summary })] }) : null,
-      list.length ? Box({ key: "list", flexDirection: "column", marginTop: 1, children: list }) : null,
+      Box({ key: "list", flexDirection: "column", children: list }),
       Box({
         key: "buttons",
         marginTop: 1,
