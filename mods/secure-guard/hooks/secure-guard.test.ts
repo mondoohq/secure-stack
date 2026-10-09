@@ -468,3 +468,32 @@ test("a version already announced today isn't announced again", async ($, on) =>
   await new Promise((r) => setTimeout(r, 200));
   expect(logs.some((l) => l.includes("is available"))).toBe(false);
 });
+
+test("a newer xgrep that reports update info as JSON is read from it (no stderr scraping)", async ($, on) => {
+  const runs: string[][] = [];
+  const logs: string[] = [];
+  const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: "", isStdoutTruncated: false, isStderrTruncated: false } });
+  on("env.get", () => ({ value: undefined }));
+  on("ui.toast", () => ({ value: undefined }));
+  on("ui.log", ($: any, e: any) => { logs.push(String(e.text ?? "")); return { value: undefined }; });
+  on("clock.now", () => ({ value: Date.now() }));
+  on("store.get", () => ({ value: undefined }));
+  on("store.set", () => ({ value: undefined }));
+  on("fs.stat", ($: any, e: any) => ({ value: { kind: "file", size: 1, mtimeMs: 0, isLink: true, realPath: LOCAL_REAL } }));
+  on("process.run", ($: any, e: any) => {
+    const argv = [...e.argv];
+    runs.push(argv);
+    if (argv[0] === "which") return ok(`${LOCAL_BIN}\n`);
+    if (argv[0] === "xgrep" && argv.includes("--check-update")) {
+      return ok(JSON.stringify({ version: "0.84.0", update: { checked: true, latest: "0.85.0", available: true } }));
+    }
+    if (argv[0] === "xgrep") return ok("{\"decision\":\"allow\",\"findings\":[]}");
+    return { deny: `spawn ${argv[0]} ENOENT` };
+  });
+  on("tool.call", { tool: "Bash" }, () => ({ result: { stdout: "", stderr: "", interrupted: false } }));
+  await $.tool.call({ tool: "Bash", command: "ls" } as any);
+  await until(() => logs.some((l) => l.includes("is available")));
+  expect(logs.find((l) => l.includes("is available")) ?? "").toContain("xgrep 0.85.0 is available (you have 0.84.0");
+  // the structured probe answered: the text-form fallback never ran
+  expect(runs.some((a) => a[0] === "xgrep" && a.length === 2 && a[1] === "version")).toBe(false);
+});
