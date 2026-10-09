@@ -59,6 +59,7 @@ import {
   cnspecScanArgs, cnspecPolicySource, cnspecPolicyNotice, sarifFindings, iacAdvisoryText,
   parseJsonObject, IAC_TIMEOUT_MS,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
+  findingsNotice, findingsToast,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -449,7 +450,21 @@ async function codeAdvisory($, file) {
   const b = await ensureBackend($);
   if (b.mode === "unavailable") return null; // scanner not here — stay quiet (fail open)
   const findings = await scanFile($, b, file);
-  return findings.length ? `${advisoryText(file, findings)}\n${FP_HINT}` : null;
+  if (!findings.length) return null;
+  announceFindings($, "xgrep", findings, file);
+  return `${advisoryText(file, findings)}\n${FP_HINT}`;
+}
+
+// announceFindings tells the user what the agent was just handed: advisories
+// reach the model as `context`, which the transcript doesn't show, so without
+// this the user sees the agent change code they didn't ask about with no
+// visible reason. A transcript line (kept, right under the edit) says what
+// Mondoo caught; a toast draws the eye to it.
+function announceFindings($, engine, findings, file) {
+  const line = findingsNotice(engine, file, findings);
+  if (line === null) return; // nothing handed over — nothing to show
+  $.ui.log(line);
+  $.ui.toast(findingsToast(engine, file, findings));
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -573,7 +588,9 @@ async function iacAdvisory($, file, kind) {
   const b = await ensureCnspec($);
   if (b.mode !== "ok") return null; // cnspec not installed — stay quiet
   const findings = await cnspecScan($, b, kind, file);
-  return findings.length ? iacAdvisoryText(file, kind, findings) : null;
+  if (!findings.length) return null;
+  announceFindings($, "cnspec", findings, file);
+  return iacAdvisoryText(file, kind, findings);
 }
 
 async function cnspecScan($, b, kind, file) {

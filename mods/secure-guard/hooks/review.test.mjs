@@ -30,6 +30,7 @@ import {
   cnspecPolicyNotice,
   combineAdvisories,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
+  findingsNotice, findingsToast,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -392,4 +393,27 @@ test("fpIssueUrl prefills a new issue on the repo, labelled", () => {
   assert.equal(u.searchParams.get("title"), "T & t");
   assert.equal(u.searchParams.get("body"), "b\nc");
   assert.equal(u.searchParams.get("labels"), FP_LABEL);
+});
+
+test("findingsNotice names Mondoo's engine, the file, and what was caught", () => {
+  assert.equal(
+    findingsNotice("xgrep", "/w/src/app.py", [{ rule: "python-sql-injection", title: "SQL injection", line: 15 }]),
+    "Mondoo xgrep found 1 issue in app.py: SQL injection (python-sql-injection), line 15. Sent to Claude to address.",
+  );
+  const many = findingsNotice("cnspec", "k8s\\pod.yaml", [
+    { rule: "r1", severity: "high", message: "Runs privileged" }, { rule: "r2", message: "b" },
+    { rule: "r3", message: "c" }, { rule: "r4", message: "d" },
+  ]);
+  assert.match(many, /^Mondoo cnspec found 4 issues in pod\.yaml: HIGH Runs privileged \(r1\); b \(r2\); c \(r3\); and 1 more\./);
+  assert.match(findingsNotice("xgrep", "", [{}]), /in the file: finding \(finding\)\./);
+});
+
+test("findingsToast shares findingsNotice's lead (one wording, two lengths)", () => {
+  const f = [{ rule: "r", title: "T", line: 1 }, { rule: "s", title: "U", line: 2 }];
+  assert.equal(findingsToast("xgrep", "/w/app.py", f), "Mondoo xgrep found 2 issues in app.py — sent to Claude");
+  assert.ok(findingsNotice("xgrep", "/w/app.py", f).startsWith("Mondoo xgrep found 2 issues in app.py: "));
+  // nothing found → nothing to say (never "found 0 issues … sent to Claude")
+  assert.equal(findingsToast("cnspec", "main.tf", []), null);
+  assert.equal(findingsNotice("cnspec", "main.tf", []), null);
+  assert.equal(findingsNotice("xgrep", "a.py", undefined), null);
 });

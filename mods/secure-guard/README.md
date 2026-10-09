@@ -11,7 +11,11 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
   high-confidence findings back right after the tool result so the agent fixes them in the
   same turn. xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the
-  code.
+  code. The transcript says what Mondoo caught — *"Mondoo xgrep found 1 issue in app.py: SQL
+  injection (python-sql-injection), line 15. Sent to Claude to address."* — right under the
+  edit, so you can see why the agent touched code you didn't ask about.
+
+  ![secure-guard's inline xgrep review catching a SQL injection that Claude then fixes](demo-inline-review.gif)
 - **IaC policy guard (cnspec)** — after the agent writes or edits Terraform, a Dockerfile, or
   a Kubernetes / CloudFormation manifest, runs cnspec policy checks and hands violations back
   the same way. Terraform and Dockerfiles get the xgrep review too, so a hard-coded secret in
@@ -149,19 +153,26 @@ node test/pipeline-scenario.mjs              # end-to-end (XGREP_PATH / CNSPEC_P
 
 The repo's build/validate/test commands are in the root [`AGENTS.md`](../../AGENTS.md).
 
-## Recording the demo
+## Recording the demos
 
-`demo.gif` is a real Claude Code session, recorded with [VHS](https://github.com/charmbracelet/vhs):
+Both GIFs are real Claude Code sessions, recorded with [VHS](https://github.com/charmbracelet/vhs)
+from the repo root (needs `claude`, `vhs`, `node`):
 
 ```bash
-vhs mods/secure-guard/demo/demo.tape   # from the repo root; needs claude, vhs, node
+vhs mods/secure-guard/demo/demo.tape            # demo.gif — the shell guard holds a piped installer
+vhs mods/secure-guard/demo/inline-review.tape   # demo-inline-review.gif — xgrep review, fixed in the same turn
 ```
 
-[`demo/setup.sh`](demo/setup.sh) runs off camera. It loads this checkout's mod, disables any
-installed copy, pre-allows Bash so the guard is the only gate, and makes sure a guard-capable
-xgrep is on `PATH`. The tape waits for what's on screen rather than fixed timings, so Claude's
-response time doesn't break a take; its wording varies a little between takes. The installer
-URL is on the reserved `example.com` domain, so nothing can run even if Proceed were pressed.
+[`demo/setup.sh`](demo/setup.sh) runs off camera. It loads this checkout's mod and disables any
+installed copy, makes sure a guard-capable xgrep is on `PATH`, and starts Claude in
+accept-edits mode with Bash and the report tool allowed, so the guard's own panes are the only
+prompts on screen. The demo project is `.demo/acme-app` at the repo root (gitignored): it has to
+live outside the mod's folder, because Claude Code asks before any edit inside a loaded plugin.
+
+The tapes wait for what's on screen rather than fixed timings, so Claude's response time
+doesn't break a take; its wording varies a little between takes. The installer URL is on the
+reserved `example.com` domain, so nothing can run even if Proceed were pressed. The inline
+review starts from [`demo/fixtures/app.py`](demo/fixtures), an intentionally vulnerable file.
 
 ## License
 

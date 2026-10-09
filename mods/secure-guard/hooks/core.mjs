@@ -469,3 +469,40 @@ export function fpIssueUrl({ title, body }) {
   const q = new URLSearchParams({ title, body, labels: FP_LABEL });
   return `https://github.com/${FP_REPO}/issues/new?${q.toString()}`;
 }
+
+// ─── What the user sees when findings go to the agent ────────────────────────
+
+const NOTICE_MAX_SHOWN = 3;
+
+// findingsNotice is the transcript line telling the user that a Mondoo scanner
+// caught something and handed it to the agent. Advisories reach the model as
+// hidden context, so this line is how the user sees what was caught and why the
+// agent is about to touch code they didn't ask about. `engine` is "xgrep"
+// (code findings: { rule, title, line }) or "cnspec" (policy findings:
+// { rule, severity, message }).
+export function findingsNotice(engine, file, findings) {
+  const list = Array.isArray(findings) ? findings : [];
+  if (list.length === 0) return null; // nothing was handed over — say nothing
+  const name = (f) => engine === "cnspec"
+    // A cnspec finding has no separate title: sarifFindings already cut its
+    // `message` down to the check's title ("<title>: FAIL · …" → "<title>"),
+    // so `message` is the human name here, as `title` is for xgrep.
+    ? `${f?.severity ? `${String(f.severity).toUpperCase()} ` : ""}${f?.message || f?.rule || "policy check"} (${f?.rule ?? "policy"})`
+    : `${f?.title || f?.rule || "finding"} (${f?.rule ?? "finding"})${f?.line ? `, line ${f.line}` : ""}`;
+  const shown = list.slice(0, NOTICE_MAX_SHOWN).map(name).join("; ");
+  const more = list.length > NOTICE_MAX_SHOWN ? `; and ${list.length - NOTICE_MAX_SHOWN} more` : "";
+  return `${foundLead(engine, file, list.length)}: ${shown}${more}. Sent to Claude to address.`;
+}
+
+// findingsToast is the short cue for the same event; it shares findingsNotice's
+// lead so the two can't drift apart. null when there is nothing to report.
+export function findingsToast(engine, file, findings) {
+  const n = Array.isArray(findings) ? findings.length : 0;
+  return n === 0 ? null : `${foundLead(engine, file, n)} — sent to Claude`;
+}
+
+// foundLead: "Mondoo xgrep found 1 issue in app.py".
+function foundLead(engine, file, n) {
+  const base = String(file ?? "").split(/[\\/]/).pop() || "the file";
+  return `Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base}`;
+}
