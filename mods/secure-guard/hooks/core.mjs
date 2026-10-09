@@ -506,3 +506,31 @@ function foundLead(engine, file, n) {
   const base = String(file ?? "").split(/[\\/]/).pop() || "the file";
   return `Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base}`;
 }
+
+// ─── The native xgrep behind npx ─────────────────────────────────────────────
+//
+// `npx -y @mondoohq/xgrep@<pin> …` re-resolves the package on every call — on a
+// busy machine that is seconds per call, enough to time the guard out and
+// let commands through unchecked. npm's `xgrep` is only a Node launcher for a
+// per-platform native binary in node_modules/@mondoohq/xgrep_<os>_<arch>/, and
+// npm installs only the current platform's one, so after the one npx fetch
+// the adapters find that binary and call it directly (milliseconds).
+
+// npxNodeModulesDir: the node_modules dir holding npx's package, from the path
+// of its bin shim (…/node_modules/.bin/xgrep, or xgrep.cmd on Windows).
+export function npxNodeModulesDir(shimPath) {
+  const p = String(shimPath ?? "").trim();
+  const parts = p.split(/[\\/]/);
+  if (parts.length < 3 || parts[parts.length - 2] !== ".bin") return null;
+  const sep = p.includes("\\") && !p.includes("/") ? "\\" : "/";
+  return parts.slice(0, -2).join(sep);
+}
+
+// nativeXgrepCandidates: the paths (relative to node_modules/@mondoohq) where
+// the platform binary can live, given that directory's entry names.
+export function nativeXgrepCandidates(entryNames) {
+  return (Array.isArray(entryNames) ? entryNames : [])
+    .filter((n) => typeof n === "string" && /^xgrep_[a-z0-9]+_[a-z0-9]+$/.test(n))
+    .sort()
+    .flatMap((n) => [`${n}/xgrep`, `${n}/xgrep.exe`]);
+}

@@ -9,6 +9,7 @@
 // (The pure logic it calls is covered by review.test.mjs.)
 
 import { test, expect } from "claude-code/testing";
+import { XGREP_PIN } from "./core.mjs";
 
 const XGREP_VERSION = "xgrep 0.80.0 (commit: test)";
 const XGREP_SECRET = JSON.stringify({
@@ -316,4 +317,72 @@ test("IaC findings are shown as Mondoo cnspec", async ($, on) => {
   fakeEngine(on, { cnspec: CNSPEC_FAIL, logs });
   await $.tool.call({ tool: "Write", file_path: "/w/main.tf", content: "x\n" } as any);
   expect(logs.some((l) => l.startsWith("Mondoo cnspec found 1 issue in main.tf: HIGH Container runs privileged"))).toBe(true);
+});
+
+// ─── Native xgrep instead of npx on every call ───────────────────────────────
+
+const NM = "/home/u/.npm/_npx/abc/node_modules";
+const NATIVE_KEY = `native-xgrep-${XGREP_PIN}`;
+const NATIVE = `${NM}/@mondoohq/xgrep_linux_amd64/xgrep`;
+
+// fakeNpxWorld: the local xgrep is too old, npx fetches the pin, and the
+// native binary sits where npm puts it. `store` is $.store; `scanFails` makes
+// every guard scan time out (to exercise the once-per-session warning).
+function fakeNpxWorld(on: any, opts: { store?: Map<string, unknown>; scanFails?: boolean } = {}) {
+  const runs: string[][] = [];
+  const logs: string[] = [];
+  const store = opts.store ?? new Map<string, unknown>();
+  const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: "", isStdoutTruncated: false, isStderrTruncated: false } });
+  on("env.get", () => ({ value: undefined }));
+  on("ui.toast", () => ({ value: undefined }));
+  on("ui.log", ($: any, e: any) => { logs.push(String(e.text ?? "")); return { value: undefined }; });
+  on("store.get", ($: any, e: any) => ({ value: store.get(e.key) }));
+  on("store.set", ($: any, e: any) => { store.set(e.key, e.value); return { value: undefined }; });
+  on("store.delete", ($: any, e: any) => { store.delete(e.key); return { value: undefined }; });
+  on("fs.list", ($: any, e: any) => ({ value: e.path === `${NM}/@mondoohq` ? [
+    { name: "xgrep", kind: "directory", size: 0, mtimeMs: 0, isLink: false },
+    { name: "xgrep_linux_amd64", kind: "directory", size: 0, mtimeMs: 0, isLink: false },
+  ] : [] }));
+  on("fs.exists", ($: any, e: any) => ({ value: e.path === NATIVE }));
+  on("process.run", ($: any, e: any) => {
+    const argv = [...e.argv];
+    runs.push(argv);
+    if (argv[0] === "xgrep" && argv[1] === "version") return ok("xgrep 0.65.0");
+    if (argv[0] === "npx" && argv.includes("which")) return ok(`${NM}/.bin/xgrep\n`);
+    if (argv[0] === "npx" && argv.includes("where")) return { deny: "spawn where ENOENT" };
+    if (argv[0] === "npx" || argv[0] === NATIVE) {
+      if (argv.includes("version")) return ok("xgrep 0.82.0");
+      if (opts.scanFails && argv.includes("guard")) return { deny: "still running after 15000ms" };
+      return ok("{\"decision\":\"allow\",\"findings\":[]}");
+    }
+    return { deny: `spawn ${argv[0]} ENOENT` };
+  });
+  on("tool.call", { tool: "Bash" }, () => ({ result: { stdout: "", stderr: "", interrupted: false } }));
+  return { runs, logs, store };
+}
+
+test("after one npx fetch the guard calls the native binary, and remembers it", async ($, on) => {
+  const { runs, store } = fakeNpxWorld(on);
+  await $.tool.call({ tool: "Bash", command: "ls -la" } as any);
+  const scans = runs.filter((a) => a.includes("guard"));
+  expect(scans.length).toBe(1);
+  expect(scans[0][0]).toBe(NATIVE); // not npx
+  expect(store.get(NATIVE_KEY)).toBe(NATIVE);
+});
+
+test("a remembered native binary needs no npx at all", async ($, on) => {
+  const { runs } = fakeNpxWorld(on, { store: new Map<string, unknown>([[NATIVE_KEY, NATIVE]]) });
+  await $.tool.call({ tool: "Bash", command: "ls -la" } as any);
+  expect(runs.some((a) => a[0] === "npx")).toBe(false);
+  expect(runs.filter((a) => a.includes("guard"))[0][0]).toBe(NATIVE);
+});
+
+test("a scan that keeps failing is reported once per session, not on every call", async ($, on) => {
+  const { logs } = fakeNpxWorld(on, { scanFails: true });
+  await $.tool.call({ tool: "Bash", command: "ls -la" } as any);
+  await $.tool.call({ tool: "Bash", command: "pwd" } as any);
+  await $.tool.call({ tool: "Bash", command: "date" } as any);
+  const failures = logs.filter((l) => l.includes("evaluate failed"));
+  expect(failures.length).toBe(1);
+  expect(failures[0]).toContain("further occurrences this session are not logged");
 });

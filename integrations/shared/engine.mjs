@@ -20,14 +20,14 @@
 // yields "allow" — a guard must never wedge a session.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import {
   normalizeVerdict, highConfidenceFindings, advisoryText, isScannable,
   iacScanKind, alsoCodeScan, combineAdvisories,
   cnspecScanArgs, cnspecPolicySource, sarifFindings, iacAdvisoryText,
-  parseJsonObject, IAC_TIMEOUT_MS, XGREP_NPM, XGREP_PIN,
+  parseJsonObject, IAC_TIMEOUT_MS, XGREP_NPM, XGREP_PIN, npxNodeModulesDir, nativeXgrepCandidates,
 } from "../../mods/secure-guard/hooks/core.mjs";
 
 export const SCAN_TIMEOUT_MS = 20000;
@@ -76,6 +76,8 @@ export function makeRealRunner(env = process.env, deps = {}) {
   const cacheFile = deps.cacheFile ?? XGREP_NPX_CACHE;
   const notify = deps.notify ?? ((line) => process.stderr.write(line + "\n"));
   const clock = deps.clock ?? Date;
+  const exists = deps.existsSync ?? existsSync;
+  const list = deps.readdir ?? ((dir) => { try { return readdirSync(dir); } catch { return []; } });
   let xgrep;  // undefined = unresolved, null = unavailable, [argv…] = resolved
   let cnspec;
   const hasCommandFlag = (cmd) => {
@@ -93,16 +95,52 @@ export function makeRealRunner(env = process.env, deps = {}) {
       if (hasCommandFlag(cmd)) { xgrep = cmd; return xgrep; }
     }
     // Nothing local is new enough: the pinned release via npx. Remembered
-    // across hook processes; announced the first time it is fetched.
+    // across hook processes; announced the first time it is fetched. Once
+    // fetched, the native binary inside the npx package is called directly —
+    // npx re-resolves the package on every call, seconds on a busy machine.
     const cached = readNpxCache(cacheFile);
-    if (cached?.ok) { xgrep = XGREP_NPX; return xgrep; }
+    if (cached?.ok && cached.bin && exists(cached.bin)) {
+      xgrep = [cached.bin];
+      return xgrep;
+    }
+    if (cached?.ok && cached.noNative) { xgrep = XGREP_NPX; return xgrep; } // looked before: npx only
+    // Otherwise — a cached native path that vanished (npm's npx cache was
+    // cleaned), or a cache from before native resolution existed — fetch and
+    // resolve again below rather than settle for npx on every call, which is
+    // the slowness this cache exists to avoid.
     if (cached?.failedAt && clock.now() - cached.failedAt < NPX_RETRY_MS) return xgrep; // backing off
-    notify(`secure-guard: no xgrep with 'guard --command' installed; fetching ${XGREP_NPM}@${XGREP_PIN} ` +
+    if (!cached?.ok) notify(`secure-guard: no xgrep with 'guard --command' installed; fetching ${XGREP_NPM}@${XGREP_PIN} ` +
       `from npm via npx (the scanner, not your data). Install it to skip this: npm i -g ${XGREP_NPM}`);
     const ok = hasCommandFlag(XGREP_NPX);
-    if (ok) xgrep = XGREP_NPX;
-    writeNpxCache(cacheFile, ok ? { ok: true } : { failedAt: clock.now() });
+    let bin = null;
+    if (ok) {
+      bin = resolveNativeXgrep();
+      xgrep = bin ? [bin] : XGREP_NPX;
+    }
+    writeNpxCache(cacheFile, ok ? { ok: true, ...(bin ? { bin } : { noNative: true }) } : { failedAt: clock.now() });
     return xgrep;
+  };
+  // resolveNativeXgrep finds the platform binary inside the pinned npx package
+  // (see core.mjs); null when it can't be found or lacks `guard --command`.
+  const resolveNativeXgrep = () => {
+    for (const finder of [["which", "xgrep"], ["where", "xgrep"]]) {
+      let r;
+      try {
+        r = spawn("npx", ["-y", "-p", `${XGREP_NPM}@${XGREP_PIN}`, ...finder], { encoding: "utf8", timeout: 120000 });
+      } catch {
+        continue;
+      }
+      if (r?.status !== 0) continue;
+      const shim = String(r.stdout ?? "").split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+      const nodeModules = npxNodeModulesDir(shim);
+      if (!nodeModules) continue;
+      const scope = join(nodeModules, "@mondoohq");
+      for (const rel of nativeXgrepCandidates(list(scope))) {
+        const bin = join(scope, rel);
+        if (exists(bin) && hasCommandFlag([bin])) return bin;
+      }
+    }
+    return null;
   };
   const resolveCnspec = () => {
     if (cnspec !== undefined) return cnspec;
