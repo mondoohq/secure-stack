@@ -316,12 +316,15 @@ jobs:
           # basis (a no-op when the branch doesn't exist remotely yet).
           git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
           # --force-with-lease lets a re-run overwrite a stale branch from an
-          # earlier attempt but refuses to clobber commits we haven't seen;
-          # --force-if-includes also refuses if the remote has commits we fetched
-          # but never integrated. --force-if-includes needs git >= 2.30, which
-          # every GitHub-hosted runner has; drop it if this is ever moved to a
-          # self-hosted runner with an older git.
-          git push --force-with-lease --force-if-includes --set-upstream origin "$BRANCH"
+          # earlier attempt (refreshing its PR, including any hand edits to it)
+          # but refuses if the branch moved between that fetch and this push.
+          #
+          # Not --force-if-includes: it refuses to overwrite a remote tip the
+          # local branch doesn't contain, and this branch is always rebuilt
+          # from main, so it never contains the earlier attempt. With it, every
+          # re-run was rejected ("remote ref updated since checkout") and a
+          # broken release PR could only be closed, never refreshed.
+          git push --force-with-lease --set-upstream origin "$BRANCH"
 
           # Build the PR body in a file to avoid nested-heredoc escaping in YAML.
           {
