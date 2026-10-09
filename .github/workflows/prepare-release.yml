@@ -293,9 +293,20 @@ jobs:
           # from publish.sh can never ride along. Directories, not individual
           # manifests: `git add` fails outright on a pathspec matching nothing.
           git add -- CHANGELOG.md README.md agents .claude-plugin .cursor-plugin \
-            gemini-extension.json skills
+            gemini-extension.json skills mods
           echo "Staged for the release PR:"
           git status --short
+          # The allowlist must cover every path the stamp step writes. publish.sh
+          # above checked the working tree, so a stamped manifest left off the
+          # list passes it and is then silently dropped from the commit (the
+          # v2.1.0 release PR left mods/ unstamped that way). Any tracked file
+          # still modified but unstaged here is exactly that, so fail rather
+          # than commit.
+          if ! git diff --quiet; then
+            echo "::error::Modified but not staged for the release commit — add these paths to the allowlist above:" >&2
+            git diff --name-only >&2
+            exit 1
+          fi
           # Title and subject must match: squash_merge_commit_title is
           # COMMIT_OR_PR_TITLE, so keeping them identical makes the squashed
           # commit subject deterministic.
