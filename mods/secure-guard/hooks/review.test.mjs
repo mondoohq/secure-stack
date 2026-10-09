@@ -30,7 +30,7 @@ import {
   cnspecPolicyNotice,
   combineAdvisories,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
-  findingsNotice,
+  findingsNotice, findingsToast,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -406,4 +406,11 @@ test("findingsNotice names Mondoo's engine, the file, and what was caught", () =
   ]);
   assert.match(many, /^Mondoo cnspec found 4 issues in pod\.yaml: HIGH Runs privileged \(r1\); b \(r2\); c \(r3\); and 1 more\./);
   assert.match(findingsNotice("xgrep", "", [{}]), /in the file: finding \(finding\)\./);
+});
+
+test("findingsToast shares findingsNotice's lead (one wording, two lengths)", () => {
+  const f = [{ rule: "r", title: "T", line: 1 }, { rule: "s", title: "U", line: 2 }];
+  assert.equal(findingsToast("xgrep", "/w/app.py", f), "Mondoo xgrep found 2 issues in app.py — sent to Claude");
+  assert.ok(findingsNotice("xgrep", "/w/app.py", f).startsWith("Mondoo xgrep found 2 issues in app.py: "));
+  assert.equal(findingsToast("cnspec", "main.tf", []), "Mondoo cnspec found 0 issues in main.tf — sent to Claude");
 });

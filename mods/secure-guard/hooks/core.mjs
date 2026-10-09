@@ -482,12 +482,26 @@ const NOTICE_MAX_SHOWN = 3;
 // { rule, severity, message }).
 export function findingsNotice(engine, file, findings) {
   const list = Array.isArray(findings) ? findings : [];
-  const n = list.length;
-  const base = String(file ?? "").split(/[\\/]/).pop() || "the file";
   const name = (f) => engine === "cnspec"
+    // A cnspec finding has no separate title: sarifFindings already cut its
+    // `message` down to the check's title ("<title>: FAIL · …" → "<title>"),
+    // so `message` is the human name here, as `title` is for xgrep.
     ? `${f?.severity ? `${String(f.severity).toUpperCase()} ` : ""}${f?.message || f?.rule || "policy check"} (${f?.rule ?? "policy"})`
     : `${f?.title || f?.rule || "finding"} (${f?.rule ?? "finding"})${f?.line ? `, line ${f.line}` : ""}`;
   const shown = list.slice(0, NOTICE_MAX_SHOWN).map(name).join("; ");
-  const more = n > NOTICE_MAX_SHOWN ? `; and ${n - NOTICE_MAX_SHOWN} more` : "";
-  return `Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base}: ${shown}${more}. Sent to Claude to address.`;
+  const more = list.length > NOTICE_MAX_SHOWN ? `; and ${list.length - NOTICE_MAX_SHOWN} more` : "";
+  return `${foundLead(engine, file, list.length)}: ${shown}${more}. Sent to Claude to address.`;
+}
+
+// findingsToast is the short cue for the same event; it shares findingsNotice's
+// lead so the two can't drift apart.
+export function findingsToast(engine, file, findings) {
+  const n = Array.isArray(findings) ? findings.length : 0;
+  return `${foundLead(engine, file, n)} — sent to Claude`;
+}
+
+// foundLead: "Mondoo xgrep found 1 issue in app.py".
+function foundLead(engine, file, n) {
+  const base = String(file ?? "").split(/[\\/]/).pop() || "the file";
+  return `Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base}`;
 }

@@ -59,7 +59,7 @@ import {
   cnspecScanArgs, cnspecPolicySource, cnspecPolicyNotice, sarifFindings, iacAdvisoryText,
   parseJsonObject, IAC_TIMEOUT_MS,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
-  findingsNotice,
+  findingsNotice, findingsToast,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -461,10 +461,8 @@ async function codeAdvisory($, file) {
 // visible reason. A transcript line (kept, right under the edit) says what
 // Mondoo caught; a toast draws the eye to it.
 function announceFindings($, engine, findings, file) {
-  const n = findings.length;
-  const base = String(file).split(/[\\/]/).pop();
   $.ui.log(findingsNotice(engine, file, findings));
-  $.ui.toast(`Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base} — sent to Claude`);
+  $.ui.toast(findingsToast(engine, file, findings));
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
