@@ -152,3 +152,143 @@ test("by default cnspec runs incognito against the public bundles", async ($, on
   expect(scan.includes("--incognito")).toBe(true);
   expect(scan.some((a) => a.startsWith("https://raw.githubusercontent.com/mondoohq/cnspec/"))).toBe(true);
 });
+
+// ─── False-positive reports ──────────────────────────────────────────────────
+
+const FP_TOOL = "mcp__secure-guard__report_false_positive";
+const FP_INPUT = {
+  rule: "python-sql-injection",
+  language: "python",
+  snippet: "def q(conn):\n    return conn.execute(\"SELECT 1 WHERE id = \" + str(int(\"5\")))\n",
+  reason: "The concatenated value is an int literal, never user input.",
+};
+const REPRO_HIT = JSON.stringify({ version: "0.80.0", results: [{ check_id: "python-sql-injection", start: { line: 2 }, extra: {} }] });
+const REPRO_MISS = JSON.stringify({ version: "0.80.0", results: [] });
+
+// fakeReporting adds what the report flow needs beneath the mod: the xgrep
+// repro scan (stdin), `gh`, the pane, the clock and the hold loop's sleeps.
+// `opened` resolves when the review pane opens; `ghRuns` logs gh calls.
+function fakeReporting(on: any, opts: { repro?: string; reproErr?: string; gh?: "ok" | "nolabel" | "missing" }) {
+  const runs: string[][] = [];
+  const ghRuns: { argv: string[]; stdin: string }[] = [];
+  let open: () => void = () => {};
+  const opened = new Promise<void>((r) => { open = r; });
+  const ok = (stdout: string, stderr = "", exitCode = 0) => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } });
+  on("env.get", () => ({ value: undefined }));
+  on("ui.toast", () => ({ value: undefined }));
+  on("ui.log", () => ({ value: undefined }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.close", () => ({ value: undefined }));
+  on("ui.open", () => { open(); return { value: { isPlaced: true } }; });
+  on("clock.now", () => ({ value: Date.now() }));
+  on("process.run", ($: any, e: any) => {
+    const argv = [...e.argv];
+    runs.push(argv);
+    // The hold loop sleeps between checks; a real (short) delay keeps it from
+    // spinning while the test presses a button.
+    if (argv[0] === "sleep") return new Promise((r) => setTimeout(() => r(ok("")), 20));
+    if (argv[0] === "xgrep") {
+      if (argv.includes("version")) return ok(XGREP_VERSION);
+      if (argv.includes("--stdin")) return opts.reproErr ? ok("", opts.reproErr, 2) : ok(opts.repro ?? REPRO_HIT);
+      return ok("{\"results\":[]}");
+    }
+    if (argv[0] === "gh") {
+      ghRuns.push({ argv, stdin: e.init?.stdin ?? "" });
+      if (opts.gh === "missing") return { deny: "spawn gh ENOENT" };
+      if (opts.gh === "nolabel" && argv.includes("--label")) return ok("", "could not add label: 'false-positive' not found", 1);
+      return ok("https://github.com/mondoohq/secure-stack/issues/123\n");
+    }
+    return { deny: `spawn ${argv[0]} ENOENT` };
+  });
+  return { runs, ghRuns, opened };
+}
+
+// review mounts the review pane once it opens and returns it, so a test can
+// read what the user sees and press a button.
+async function review($: any, opened: Promise<void>) {
+  await opened;
+  return $.ui.mount({ plugin: "secure-guard", surface: "terminal", component: "Pane", requestId: "secure-guard", props: {} as any });
+}
+
+test("report: invalid input is answered with what to fix — no scan, no pane", async ($, on) => {
+  const { runs } = fakeReporting(on, {});
+  const r: any = await $.tool.call({ tool: FP_TOOL, rule: "", language: "python", snippet: "", reason: "" } as any);
+  expect(String(r.result)).toContain("Not filed");
+  expect(String(r.result)).toContain("`rule`");
+  expect(runs.some((a) => a.includes("--stdin"))).toBe(false);
+});
+
+test("report: a snippet that doesn't trigger the rule is not filed", async ($, on) => {
+  const { ghRuns } = fakeReporting(on, { repro: REPRO_MISS });
+  const r: any = await $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  expect(String(r.result)).toContain("does not trigger python-sql-injection");
+  expect(ghRuns.length).toBe(0);
+});
+
+test("report: an unknown rule id is reported back from xgrep", async ($, on) => {
+  fakeReporting(on, { reproErr: "error: unknown --rule-id value \"nope\"" });
+  const r: any = await $.tool.call({ tool: FP_TOOL, ...FP_INPUT, rule: "nope" } as any);
+  expect(String(r.result)).toContain("unknown --rule-id");
+});
+
+test("report: the snippet goes to xgrep on stdin with the rule filter", async ($, on) => {
+  const { runs, opened } = fakeReporting(on, {});
+  const call = $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  const pane = await review($, opened);
+  await pane.press({ key: "cancel" });
+  await call;
+  const scan = runs.find((a) => a.includes("--stdin"))!;
+  expect(scan).toEqual(["xgrep", "scan", "--stdin", "--lang", "python", "--rule-id", "python-sql-injection", "--json"]);
+});
+
+test("report: the user sees the exact issue, and Cancel files nothing", async ($, on) => {
+  const { ghRuns, opened } = fakeReporting(on, {});
+  const call = $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  const pane = await review($, opened);
+  expect(await pane.find({ text: /False positive: python-sql-injection \(python\)/ })).toBeTruthy();
+  expect(await pane.find({ text: /\(public\)/ })).toBeTruthy();
+  await pane.press({ key: "cancel" });
+  const r: any = await call;
+  expect(String(r.result)).toContain("Not filed: the user pressed Cancel");
+  expect(ghRuns.length).toBe(0);
+});
+
+test("report: File issue files it with gh, body on stdin, labelled", async ($, on) => {
+  const { ghRuns, opened } = fakeReporting(on, { gh: "ok" });
+  const call = $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  await (await review($, opened)).press({ key: "file" });
+  const r: any = await call;
+  expect(String(r.result)).toContain("Filed https://github.com/mondoohq/secure-stack/issues/123");
+  expect(ghRuns.length).toBe(1);
+  expect(ghRuns[0].argv).toContain("--label");
+  expect(ghRuns[0].argv.slice(0, 5)).toEqual(["gh", "issue", "create", "--repo", "mondoohq/secure-stack"]);
+  // the body is the reviewed issue: repro, rule, xgrep version, and the reason
+  expect(ghRuns[0].stdin).toContain("str(int(");
+  expect(ghRuns[0].stdin).toContain("**xgrep:** 0.80.0");
+  expect(ghRuns[0].stdin).toContain("int literal, never user input");
+});
+
+test("report: a repo without the label still gets the issue", async ($, on) => {
+  const { ghRuns, opened } = fakeReporting(on, { gh: "nolabel" });
+  const call = $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  await (await review($, opened)).press({ key: "file" });
+  const r: any = await call;
+  expect(String(r.result)).toContain("Filed https://github.com/");
+  expect(ghRuns.length).toBe(2);
+  expect(ghRuns[1].argv.includes("--label")).toBe(false);
+});
+
+test("report: without gh, the user gets a prefilled link instead", async ($, on) => {
+  const { opened } = fakeReporting(on, { gh: "missing" });
+  const call = $.tool.call({ tool: FP_TOOL, ...FP_INPUT } as any);
+  await (await review($, opened)).press({ key: "file" });
+  const r: any = await call;
+  expect(String(r.result)).toContain("Not filed automatically");
+  expect(String(r.result)).toContain("https://github.com/mondoohq/secure-stack/issues/new?title=False+positive");
+});
+
+test("code advisories point the agent at the false-positive report", async ($, on) => {
+  fakeEngine(on, { scan: XGREP_SECRET });
+  const r = await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
+  expect(advisories(r)).toContain("report_false_positive");
+});

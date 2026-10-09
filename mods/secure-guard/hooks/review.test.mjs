@@ -29,6 +29,7 @@ import {
   cnspecPolicySource,
   cnspecPolicyNotice,
   combineAdvisories,
+  FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -346,4 +347,49 @@ test("normalizeVerdict: severity leads a line when present; several findings joi
 test("normalizeVerdict: no findings falls back to the summary's first line, then a default", () => {
   assert.equal(normalizeVerdict({ decision: "deny", summary: "Risky thing detected:\n  - detail" }).flagged, "Risky thing detected");
   assert.equal(normalizeVerdict({ decision: "deny" }).flagged, "a risky command");
+});
+
+test("validateFpReport accepts a complete report and names each missing field", () => {
+  const good = { rule: "python-sql-injection", language: "python", snippet: "x = 1\n", reason: "safe" };
+  assert.deepEqual(validateFpReport(good), []);
+  const bad = validateFpReport({});
+  assert.equal(bad.length, 4);
+  assert.match(bad.join(" "), /`rule`.*`language`.*`snippet`.*`reason`/s);
+  assert.match(validateFpReport({ ...good, rule: "a b" }).join(), /`rule`/);
+  assert.match(validateFpReport({ ...good, language: "py thon" }).join(), /`language`/);
+});
+
+test("validateFpReport keeps the repro minimal", () => {
+  const good = { rule: "r", language: "go", reason: "safe" };
+  assert.match(validateFpReport({ ...good, snippet: "x\n".repeat(61) }).join(), /at most 60 lines/);
+  assert.match(validateFpReport({ ...good, snippet: "x".repeat(4001) }).join(), /4000 characters/);
+  assert.match(validateFpReport({ ...good, snippet: "x", reason: "y".repeat(2001) }).join(), /`reason`/);
+});
+
+test("fpReproArgs / fpReproduces: the repro command and its check", () => {
+  assert.deepEqual(fpReproArgs("r1", "go"), ["scan", "--stdin", "--lang", "go", "--rule-id", "r1", "--json"]);
+  assert.equal(fpReproduces({ results: [{ check_id: "r1" }] }, "r1"), true);
+  assert.equal(fpReproduces({ results: [{ check_id: "r2" }] }, "r1"), false);
+  assert.equal(fpReproduces(null, "r1"), false);
+});
+
+test("fpIssue: title, repro block, version, reason; optional expected; fence can't be broken", () => {
+  const { title, body } = fpIssue({ rule: "r1", language: "python", snippet: "a = 1\n", reason: "safe", xgrepVersion: "0.80.0" });
+  assert.equal(title, "False positive: r1 (python)");
+  assert.match(body, /```python\na = 1\n```/);
+  assert.match(body, /\*\*xgrep:\*\* 0\.80\.0/);
+  assert.match(body, /### Why this is a false positive\n\nsafe/);
+  assert.doesNotMatch(body, /### Expected/);
+  assert.match(fpIssue({ rule: "r", language: "go", snippet: "x", reason: "y", expected: "no finding" }).body, /### Expected\n\nno finding/);
+  const tricky = fpIssue({ rule: "r", language: "md", snippet: "```\nx\n```", reason: "y" }).body;
+  assert.match(tricky, /````md\n```\nx\n```\n````/);
+  assert.match(fpIssue({ rule: "r", language: "go", snippet: "x", reason: "y" }).body, /\*\*xgrep:\*\* unknown/);
+});
+
+test("fpIssueUrl prefills a new issue on the repo, labelled", () => {
+  const u = new URL(fpIssueUrl({ title: "T & t", body: "b\nc" }));
+  assert.equal(u.origin + u.pathname, `https://github.com/${FP_REPO}/issues/new`);
+  assert.equal(u.searchParams.get("title"), "T & t");
+  assert.equal(u.searchParams.get("body"), "b\nc");
+  assert.equal(u.searchParams.get("labels"), FP_LABEL);
 });
