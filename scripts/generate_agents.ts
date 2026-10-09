@@ -51,7 +51,7 @@ const INTEGRATIONS: Integration[] = [
     dir: "mods/secure-guard",
     entry: "hooks/secure-guard.mjs",
     install: "`/plugin install secure-guard@secure-stack`",
-    posture: "shell blocks; code/IaC advisory (post-write)",
+    posture: "shell held until you choose Proceed / Cancel; code + IaC findings fed back after the write",
   },
   {
     agent: "OpenAI Codex",
@@ -75,7 +75,7 @@ const INTEGRATIONS: Integration[] = [
     dir: "integrations/pi",
     entry: "index.ts",
     install: "load `integrations/pi` as a Pi extension",
-    posture: "block (pre-write); `ask` via `ctx.ui.confirm`",
+    posture: "block (pre-write); `ask` blocks too until a `ctx.ui.confirm` prompt is wired",
   },
   {
     agent: "opencode",
