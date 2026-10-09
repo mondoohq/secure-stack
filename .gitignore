@@ -16,3 +16,9 @@ Thumbs.db
 
 # scan caches from mod scenarios
 .xgrep/
+
+# secure-guard demo recording: local xgrep install and the scratch project (see mods/secure-guard/demo/setup.sh).
+mods/secure-guard/demo/.bin/
+mods/secure-guard/demo/acme-app/
+# Editor types Claude Code generates when a mod is loaded with --plugin-dir.
+mods/*/tsconfig.json

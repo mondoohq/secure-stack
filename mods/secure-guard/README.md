@@ -3,6 +3,8 @@
 A [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts Mondoo's
 scanners in the loop as an AI agent works — routing each tool call to the right engine:
 
+![secure-guard holding a piped installer in Claude Code until the user decides](demo.gif)
+
 - **Shell guard (xgrep)** — holds a risky Bash command behind a Proceed / Cancel pane until
   you answer. xgrep here **prevents secrets and PII from leaving** via a prompt or tool call,
   and blocks dangerous commands.
@@ -120,6 +122,20 @@ node test/pipeline-scenario.mjs              # end-to-end (XGREP_PATH / CNSPEC_P
 ```
 
 The repo's build/validate/test commands are in the root [`AGENTS.md`](../../AGENTS.md).
+
+## Recording the demo
+
+`demo.gif` is a real Claude Code session, recorded with [VHS](https://github.com/charmbracelet/vhs):
+
+```bash
+vhs mods/secure-guard/demo/demo.tape   # from the repo root; needs claude, vhs, node
+```
+
+[`demo/setup.sh`](demo/setup.sh) runs off camera. It loads this checkout's mod, disables any
+installed copy, pre-allows Bash so the guard is the only gate, and makes sure a guard-capable
+xgrep is on `PATH`. The tape waits for what's on screen rather than fixed timings, so Claude's
+response time doesn't break a take; its wording varies a little between takes. The installer
+URL is on the reserved `example.com` domain, so nothing can run even if Proceed were pressed.
 
 ## License
 
