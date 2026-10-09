@@ -25,9 +25,14 @@
 
 export const XGREP_NPM = "@mondoohq/xgrep"; // public package — the fetch/install source
 // Pinned to a tested release so a session can't pull up an unvetted build.
-export const XGREP_PIN = "0.80.0";
-// Minimum xgrep the guard needs: `xgrep guard --command` landed in 0.78.0.
-export const XGREP_MIN = "0.78.0";
+export const XGREP_PIN = "0.84.0";
+// Minimum xgrep the guard needs. 0.84.0 is where `guard --command` runs every
+// scan leg the hook runs (secrets and PII in commands, referenced scripts,
+// inline code — xgrep#3233), gains the env-var-secret, env-dump and destructive
+// command rules (#3235), honors rule categories (#3236/#3237), and reports
+// updates as JSON (#3238). Older builds run, but miss what the docs promise, so
+// the guard uses the pinned release instead and offers /secure-guard update.
+export const XGREP_MIN = "0.84.0";
 
 export const CNSPEC_INSTALL_URL = "https://mondoo.com/docs/cnspec/install";
 
@@ -533,4 +538,54 @@ export function nativeXgrepCandidates(entryNames) {
     .filter((n) => typeof n === "string" && /^xgrep_[a-z0-9]+_[a-z0-9]+$/.test(n))
     .sort()
     .flatMap((n) => [`${n}/xgrep`, `${n}/xgrep.exe`]);
+}
+
+// ─── Keeping the user's xgrep current ────────────────────────────────────────
+//
+// xgrep checks for newer releases itself (Mondoo's install service, cached 24h,
+// skipped for dev builds and with XGREP_UPDATE_CHECK=0 / DO_NOT_TRACK=1) and
+// prints the result to stderr on `xgrep version` — which the guard already
+// runs to probe the binary. So the guard reads the answer from that probe: no
+// extra process, no network call of its own, and xgrep's opt-outs apply.
+
+export const XGREP_INSTALL_URL = "https://install.mondoo.com";
+
+// parseUpdateNotice reads xgrep's "A new xgrep release is available: v0.81.0 →
+// v0.83.0" line (ANSI styling stripped); null when there is none.
+export function parseUpdateNotice(stderr) {
+  const text = String(stderr ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  const m = /new xgrep release is available:\s*v?(\d+\.\d+\.\d+)\s*(?:→|->)\s*v?(\d+\.\d+\.\d+)/i.exec(text);
+  return m ? { current: m[1], latest: m[2] } : null;
+}
+
+// npmGlobalPrefix: the npm prefix an xgrep was installed under, from the real
+// path of its launcher (<prefix>/lib/node_modules/@mondoohq/xgrep/… on Unix,
+// <prefix>\node_modules\@mondoohq\xgrep\… on Windows); null when it isn't an
+// npm global install (a release download, a dev build, an npx cache).
+export function npmGlobalPrefix(realPath) {
+  const p = String(realPath ?? "");
+  if (/[\\/]_npx[\\/]/.test(p)) return null; // npx's cache, not a global install
+  const m = /^(.*?)[\\/](?:lib[\\/])?node_modules[\\/]@mondoohq[\\/]xgrep(?:_[a-z0-9]+_[a-z0-9]+)?[\\/]/.exec(p);
+  return m && m[1] ? m[1] : null;
+}
+
+// xgrepUpdateArgv: the command that updates xgrep. With a prefix it updates
+// exactly the install the guard runs; without one it installs a global copy.
+export function xgrepUpdateArgv(prefix) {
+  return prefix
+    ? ["npm", "--prefix", prefix, "install", "-g", `${XGREP_NPM}@latest`]
+    : ["npm", "install", "-g", `${XGREP_NPM}@latest`];
+}
+
+// parseVersionJSON reads `xgrep version --json --check-update` (xgrep with
+// mondoohq/xgrep#3238): { version, update } where update is
+// { current, latest } when a newer release is out, else null. null when the
+// output isn't that document (an older xgrep — fall back to the text form).
+export function parseVersionJSON(stdout) {
+  const doc = parseJsonObject(stdout ?? "");
+  const version = parseVersion(doc?.version);
+  if (!version) return null;
+  const u = doc.update;
+  const latest = u?.checked && u?.available ? parseVersion(u.latest) : null;
+  return { version, update: latest ? { current: version, latest } : null };
 }

@@ -33,7 +33,7 @@ idempotent.
 
 - **node** on `PATH`.
 - **xgrep** on `PATH` (or `XGREP_PATH=/path/to/xgrep`), new enough to support
-  `guard --command` (≥ 0.78). Get it from [xgrep.ai](https://xgrep.ai) /
+  `guard --command` (≥ 0.84). Get it from [xgrep.ai](https://xgrep.ai) /
   [docs](https://mondoo.com/docs/xgrep) / the `@mondoohq/xgrep` npm package.
   If none new enough is installed, the hook fetches the pinned release from the
   `@mondoohq/xgrep` npm package via `npx` (the scanner, not your data), says so on stderr,

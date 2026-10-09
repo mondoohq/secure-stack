@@ -6,8 +6,11 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
 ![secure-guard holding a piped installer in Claude Code until the user decides](demo.gif)
 
 - **Shell guard (xgrep)** — holds a risky Bash command behind a Proceed / Cancel pane until
-  you answer. xgrep here **prevents secrets and PII from leaving** via a prompt or tool call,
-  and blocks dangerous commands.
+  you answer. xgrep here **keeps secrets and PII from leaving**: a token or an SSN in the
+  command, credential files, a secret sent by variable name, or the whole environment piped
+  to a remote host. It also holds remote code piped into a shell, reverse shells, and
+  destructive commands (`rm -rf` of home or root, a force-push to `main`, `DROP DATABASE`,
+  `chmod -R 777 /`). Each of these is a [category](#tuning-the-guard) you can tune.
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
   high-confidence findings back right after the tool result so the agent fixes them in the
   same turn. xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the
@@ -95,7 +98,9 @@ policy download in the session the first time each happens:
 
 | What | When | Direction |
 |------|------|-----------|
-| the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.78 is installed | down: the scanner, not your data |
+| the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.84 is installed | down: the scanner, not your data |
+| a version check against [install.mondoo.com](https://install.mondoo.com) | xgrep's own, when the guard runs `xgrep version` to probe it; cached for 24 h; off with `XGREP_UPDATE_CHECK=0` or `DO_NOT_TRACK=1` | down: the latest version number |
+| a newer xgrep, from the npm package | only when you run `/secure-guard update` | down: the scanner |
 | cnspec policy bundles, from [github.com/mondoohq/cnspec](https://github.com/mondoohq/cnspec/tree/main/content) | on an IaC scan, unless `CNSPEC_CONTENT_DIR` points at a local copy | down: policies only |
 | cnspec providers (e.g. its Terraform provider) | on an IaC scan, when cnspec's own `--auto-update` (on by default) finds one missing or outdated | down: cnspec's plugins |
 | scan results to your Mondoo Platform space | only with `CNSPEC_USE_PLATFORM=1` | up, by your choice |
@@ -138,7 +143,57 @@ the complete picture. Install mods only from sources you trust.
 ## Status in a session
 
 Run `/secure-guard` to see how it's reaching each engine (xgrep: daemon / in-process /
-fetched; cnspec: available / not installed).
+fetched; cnspec: available / not installed), and whether a newer xgrep is available.
+
+## Tuning the guard
+
+Every shell-guard rule belongs to a category: `secrets`, `pii`, `remote-code`,
+`remote-access`, `exfiltration`, `destructive`, `code-execution`, `obfuscation`. Each one
+blocks by default (the guard holds the command for you). To change that, set a category's mode
+to `block`, `ask`, `warn` or `off` in a `guard.yaml`. xgrep reads it, so it applies to the
+guard without any setting in the mod:
+
+```yaml
+# <user config dir>/xgrep/guard.yaml  — e.g. ~/.config/xgrep/guard.yaml, or
+# ~/Library/Application Support/xgrep/guard.yaml on macOS
+categories:
+  pii: off          # we redact PII elsewhere
+  destructive: ask
+```
+
+A repository's own `.xgrep/guard.yaml` can only make a category **stricter**: a repo you clone
+can't switch your guard off. Run `xgrep guard categories` to see each category's mode and where
+it came from; the [xgrep guard docs](https://mondoo.com/docs/xgrep/ai-agents/guard-hooks)
+have the details.
+
+## Keeping xgrep current
+
+New xgrep releases add and sharpen the rules the guard runs, so an outdated xgrep quietly
+catches less. xgrep already checks for newer releases itself when it reports its version,
+which the guard does to probe it. The guard reads that answer, so it makes no network call of
+its own, and xgrep's opt-outs (`XGREP_UPDATE_CHECK=0`, `DO_NOT_TRACK=1`) turn the notice off.
+With an xgrep that supports `version --json --check-update`, the guard reads the answer as
+structured data; with an older one, it reads xgrep's update notice instead.
+
+When a newer xgrep is out, the transcript says so, at most once a day per version:
+
+```
+secure-guard: xgrep 0.83.0 is available (you have 0.81.0 at /opt/homebrew/bin/xgrep).
+Run /secure-guard update to install it — it runs: npm --prefix /opt/homebrew install -g @mondoohq/xgrep@latest
+```
+
+Run **`/secure-guard update`** to install it. The guard then switches to the new binary right
+away. What the update does depends on how xgrep is installed:
+
+- **An npm global install** (including one under Homebrew's Node) is updated in place, with
+  the npm prefix it lives under, so it updates the copy the guard actually runs.
+- **No local install** (the guard was using the npm package it fetched): a global copy is
+  installed, and the guard prefers it from then on.
+- **Anything else** (a release download, a development build) is left alone, and you get the
+  link to [install.mondoo.com](https://install.mondoo.com) to update it the way you installed it.
+
+The update only runs when you type `/secure-guard update` yourself. It never runs for the
+model, the SDK or another plugin, because it changes software on your machine.
 
 ## Testing
 

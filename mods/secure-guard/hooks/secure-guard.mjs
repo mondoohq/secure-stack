@@ -61,6 +61,7 @@ import {
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
   npxNodeModulesDir, nativeXgrepCandidates,
+  XGREP_INSTALL_URL, parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv, parseVersionJSON,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -102,6 +103,14 @@ const warned = new Set();
 // $.store key for the native xgrep behind the pinned npx package (see
 // resolveNativeXgrep); keyed by the pin so a new pin resolves afresh.
 const NATIVE_XGREP_KEY = `native-xgrep-${XGREP_PIN}`;
+// A newer xgrep the user could update to, noticed during the backend probe:
+// { current, latest, path, prefix, canUpdate } (see noteXgrepUpdate), or null.
+let xgrepUpdate = null;
+// The update note in flight (noteXgrepUpdate runs in the background so it
+// never delays a tool call; /secure-guard update waits for it).
+let xgrepUpdateNoted = Promise.resolve();
+// How often the same available version is announced.
+const UPDATE_NOTICE_EVERY_MS = 24 * 60 * 60 * 1000;
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -111,7 +120,8 @@ export function register(on) {
     try {
       await $.command.register({
         name: "secure-guard",
-        description: "Show how secure-guard is reaching xgrep and cnspec",
+        description: "Show how secure-guard is reaching xgrep and cnspec; `update` installs a newer xgrep",
+        argumentHint: "[update]",
       });
     } catch {
       // name already taken — fine
@@ -155,7 +165,8 @@ export function register(on) {
   });
 
   // A /secure-guard command the user can run to see (and re-resolve) the engines.
-  on("command.run", { command: "secure-guard" }, async ($) => {
+  on("command.run", { command: "secure-guard" }, async ($, e) => {
+    if (String(e.args ?? "").trim() === "update") return { text: await runXgrepUpdate($, e) };
     const b = await ensureBackend($);
     const xline = {
       daemon: `warm daemon at ${b.addr}`,
@@ -169,6 +180,9 @@ export function register(on) {
         `secure-guard\n` +
         `  xgrep (shell + code): ${xline}\n` +
         `  cnspec (IaC policy):  ${cline}\n` +
+        (xgrepUpdate
+          ? `  update available:     xgrep ${xgrepUpdate.latest ?? "(newer)"} — run /secure-guard update\n`
+          : "") +
         `Docs: ${DOCS_URL}\n` +
         `npm package (xgrep): ${NPM_URL}`,
     };
@@ -326,9 +340,12 @@ async function ensureBackend($) {
     if (!p.ok) continue;
     if (meetsMin(p.version)) {
       backend = await connectOrInproc($, cmd);
+      xgrepUpdateNoted = noteXgrepUpdate($, cmd, p.update).catch(() => {});
       return backend;
     }
     outdated = p.version ?? "an older build";
+    // Too old for the guard: worth updating whether or not a release notice came.
+    xgrepUpdateNoted = noteXgrepUpdate($, cmd, p.update ?? { current: p.version ?? "an older build", latest: null }).catch(() => {});
   }
 
   // Nothing local qualifies. A native binary resolved from the pinned npx
@@ -338,6 +355,7 @@ async function ensureBackend($) {
     const c = await probe($, [cached]);
     if (c.ok && meetsMin(c.version)) {
       backend = await connectOrInproc($, [cached]);
+      if (!outdated) xgrepUpdateNoted = noteXgrepUpdate($, null, c.update).catch(() => {}); // no local install
       return backend;
     }
     await $.store.delete(NATIVE_XGREP_KEY).catch(() => {});
@@ -362,6 +380,7 @@ async function ensureBackend($) {
     const native = await resolveNativeXgrep($);
     if (native) await $.store.set(NATIVE_XGREP_KEY, native).catch(() => {});
     backend = await connectOrInproc($, native ? [native] : npx);
+    if (!outdated) xgrepUpdateNoted = noteXgrepUpdate($, null, p.update).catch(() => {}); // no local install
     return backend;
   }
   backend = { mode: "unavailable", reason: `no xgrep >= ${XGREP_MIN} found or fetchable (${XGREP_NPM}). Install it: ${NPM_URL}` };
@@ -407,13 +426,110 @@ function warnOnce($, key, line) {
   $.ui.toast("secure-guard: a scan failed and the action went through unchecked — see the transcript");
 }
 
+// ─── Keeping the user's xgrep current ────────────────────────────────────────
+
+// noteXgrepUpdate records that a newer xgrep is available for the binary the
+// guard runs (`cmd`; null when xgrep comes from the npx package, i.e. there is
+// no local install) and tells the user — at most once per version a day, so a
+// version they don't want right now doesn't nag every session.
+async function noteXgrepUpdate($, cmd, update) {
+  if (!update) return;
+  let path = null;
+  let prefix = null;
+  if (cmd && cmd.length === 1) {
+    path = cmd[0];
+    if (!/[\\/]/.test(path)) path = await whichXgrep($, path);
+    const real = path ? (await $.fs.stat(path, { resolve: true }).catch(() => undefined))?.realPath : undefined;
+    prefix = npmGlobalPrefix(real ?? path);
+  }
+  // An npm global install can be updated in place; no local install at all can
+  // get one; anything else (a release download, a dev build) is the user's.
+  const canUpdate = cmd === null || prefix !== null;
+  xgrepUpdate = { current: update.current, latest: update.latest, path, prefix, canUpdate };
+
+  const key = `xgrep-update-noticed-${update.latest ?? `below-${XGREP_MIN}`}`;
+  const last = await $.store.get(key).catch(() => undefined);
+  const now = await $.clock.now();
+  if (typeof last === "number" && now - last < UPDATE_NOTICE_EVERY_MS) return;
+  await $.store.set(key, now).catch(() => {});
+
+  const what = update.latest
+    ? `xgrep ${update.latest} is available (you have ${update.current}${path ? ` at ${path}` : ""}).`
+    : `xgrep ${update.current}${path ? ` at ${path}` : ""} is too old for the guard (needs ${XGREP_MIN}).`;
+  $.ui.log(
+    canUpdate
+      ? `secure-guard: ${what} Run /secure-guard update to install it — it runs: ${xgrepUpdateArgv(prefix).join(" ")}`
+      : `secure-guard: ${what} It isn't an npm install, so update it the way you installed it: ${XGREP_INSTALL_URL}`,
+  );
+  $.ui.toast(canUpdate ? "secure-guard: a newer xgrep is available — /secure-guard update" : "secure-guard: a newer xgrep is available");
+}
+
+async function whichXgrep($, name) {
+  for (const finder of [["which", name], ["where", name]]) {
+    try {
+      const r = await $.process.run(finder, { timeoutMs: 10000 });
+      const line = String(r.stdout ?? "").split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+      if (r.exitCode === 0 && line) return line;
+    } catch {
+      // try the next finder
+    }
+  }
+  return null;
+}
+
+// runXgrepUpdate answers `/secure-guard update`: it installs the newer xgrep
+// with npm, then switches the guard to it. It runs only when the person typed
+// the command (origin "composer") — never for the model, the SDK or a plugin —
+// because it changes software on their machine.
+async function runXgrepUpdate($, e) {
+  if (e?.origin?.kind !== "composer") {
+    return "secure-guard: `/secure-guard update` only runs when you type it yourself.";
+  }
+  await ensureBackend($);
+  await xgrepUpdateNoted; // the probe's update note may still be in flight
+  const u = xgrepUpdate;
+  if (!u) return "secure-guard: xgrep is up to date — nothing to update.";
+  if (!u.canUpdate) {
+    return `secure-guard: this xgrep${u.path ? ` (${u.path})` : ""} isn't an npm install, so the guard won't change it. ` +
+      `Update it the way you installed it: ${XGREP_INSTALL_URL}`;
+  }
+  const argv = xgrepUpdateArgv(u.prefix);
+  $.ui.toast("secure-guard: updating xgrep…");
+  let r;
+  try {
+    r = await $.process.run(argv, { timeoutMs: 10 * 60 * 1000 });
+  } catch (err) {
+    return `secure-guard: the update didn't run (${err?.message ?? err}). Run it yourself: ${argv.join(" ")}`;
+  }
+  if (r.exitCode !== 0) {
+    const tail = String(r.stderr || r.stdout || "").trim().split("\n").slice(-5).join("\n");
+    return `secure-guard: the update failed (exit ${r.exitCode}):\n${tail}\nRun it yourself: ${argv.join(" ")}`;
+  }
+  // Re-resolve, so the guard runs the binary that was just installed.
+  backend = null;
+  xgrepUpdate = null;
+  const b = await ensureBackend($);
+  const v = b.cmd ? await probe($, b.cmd) : { ok: false };
+  return `secure-guard: updated xgrep${v.ok ? ` to ${v.version}` : ""} (${argv.join(" ")}). The guard uses it from now on.`;
+}
+
 // probe runs `xgrep version` and returns whether it ran and the semver it
 // reported (e.g. "xgrep 0.80.0 (commit: …)" -> "0.80.0").
 async function probe($, cmd) {
+  // Structured first: `version --json --check-update` (xgrep#3238) reports the
+  // version and any newer release as data. An older xgrep rejects the flag, so
+  // fall back to the text form, whose update notice rides along on stderr.
+  try {
+    const j = await $.process.run([...cmd, "version", "--json", "--check-update"], { timeoutMs: 120000 });
+    const doc = j.exitCode === 0 ? parseVersionJSON(j.stdout) : null;
+    if (doc) return { ok: true, version: doc.version, update: doc.update };
+  } catch {
+    // fall through to the text form
+  }
   try {
     const r = await $.process.run([...cmd, "version"], { timeoutMs: 120000 });
     if (r.exitCode !== 0) return { ok: false };
-    return { ok: true, version: parseVersion(r.stdout) };
+    return { ok: true, version: parseVersion(r.stdout), update: parseUpdateNotice(r.stderr) };
   } catch {
     return { ok: false };
   }

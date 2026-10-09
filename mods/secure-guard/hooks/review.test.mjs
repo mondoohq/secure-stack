@@ -31,6 +31,7 @@ import {
   combineAdvisories,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
+  parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv, parseVersionJSON,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -142,9 +143,11 @@ test("cmpSemver orders versions", () => {
   assert.equal(cmpSemver("0.9.0", "0.10.0"), -1); // numeric, not lexical
 });
 
-test("meetsMin gates on the 0.78.0 floor (guard --command)", () => {
-  assert.equal(meetsMin("0.80.0"), true);
-  assert.equal(meetsMin("0.78.0"), true); // the floor itself
+test("meetsMin gates on the 0.84.0 floor (every --command leg, the new rules)", () => {
+  assert.equal(meetsMin("0.85.0"), true);
+  assert.equal(meetsMin("0.84.0"), true); // the floor itself
+  assert.equal(meetsMin("0.83.0"), false);
+  assert.equal(meetsMin("0.80.0"), false);
   assert.equal(meetsMin("0.77.0"), false); // predates --command
   assert.equal(meetsMin("0.65.0"), false);
   assert.equal(meetsMin(null), false); // unparseable → treat as too old
@@ -416,4 +419,39 @@ test("findingsToast shares findingsNotice's lead (one wording, two lengths)", ()
   assert.equal(findingsToast("cnspec", "main.tf", []), null);
   assert.equal(findingsNotice("cnspec", "main.tf", []), null);
   assert.equal(findingsNotice("xgrep", "a.py", undefined), null);
+});
+
+test("parseUpdateNotice reads xgrep's own notice, styled or plain", () => {
+  assert.deepEqual(parseUpdateNotice("\x1b[33m⚠ A new xgrep release is available: v0.80.0 → v0.83.0\x1b[0m\n  Update with …"), { current: "0.80.0", latest: "0.83.0" });
+  assert.deepEqual(parseUpdateNotice("A new xgrep release is available: 0.81.0 -> 0.83.0"), { current: "0.81.0", latest: "0.83.0" });
+  assert.equal(parseUpdateNotice("xgrep 0.83.0 (commit: abc)"), null);
+  assert.equal(parseUpdateNotice(undefined), null);
+});
+
+test("npmGlobalPrefix finds the npm prefix of a global install, and nothing else", () => {
+  assert.equal(npmGlobalPrefix("/Users/u/.nvm/versions/node/v22/lib/node_modules/@mondoohq/xgrep/bin/xgrep.js"), "/Users/u/.nvm/versions/node/v22");
+  assert.equal(npmGlobalPrefix("/opt/homebrew/lib/node_modules/@mondoohq/xgrep/index.js"), "/opt/homebrew");
+  assert.equal(npmGlobalPrefix("C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@mondoohq\\xgrep\\bin\\xgrep.js"), "C:\\Users\\u\\AppData\\Roaming\\npm");
+  assert.equal(npmGlobalPrefix("/home/u/.npm/_npx/abc/node_modules/@mondoohq/xgrep_linux_amd64/xgrep"), null); // npx cache
+  assert.equal(npmGlobalPrefix("/Users/u/go/bin/xgrep"), null); // dev build
+  assert.equal(npmGlobalPrefix(undefined), null);
+});
+
+test("xgrepUpdateArgv updates the install in place, or installs a global copy", () => {
+  assert.deepEqual(xgrepUpdateArgv("/opt/homebrew"), ["npm", "--prefix", "/opt/homebrew", "install", "-g", "@mondoohq/xgrep@latest"]);
+  assert.deepEqual(xgrepUpdateArgv(null), ["npm", "install", "-g", "@mondoohq/xgrep@latest"]);
+});
+
+test("parseVersionJSON reads version and update from xgrep version --json --check-update", () => {
+  assert.deepEqual(
+    parseVersionJSON(JSON.stringify({ version: "0.81.0", update: { checked: true, latest: "0.83.0", available: true } })),
+    { version: "0.81.0", update: { current: "0.81.0", latest: "0.83.0" } });
+  assert.deepEqual(parseVersionJSON(JSON.stringify({ version: "0.83.0", update: { checked: true, latest: "0.83.0", available: false } })),
+    { version: "0.83.0", update: null });
+  // not checked (opted out / lookup failed) is "unknown", not an update
+  assert.deepEqual(parseVersionJSON(JSON.stringify({ version: "0.81.0", update: { checked: false, available: false } })),
+    { version: "0.81.0", update: null });
+  // an older xgrep printed text or an error: not the document
+  assert.equal(parseVersionJSON("xgrep 0.80.0 (commit: x)"), null);
+  assert.equal(parseVersionJSON('Error: unknown flag: --check-update'), null);
 });
