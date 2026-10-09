@@ -12,9 +12,9 @@ Require claude
 Require xgrep
 
 Set Shell bash
-Set FontSize 24
+Set FontSize 20
 Set Width 1800
-Set Height 1200
+Set Height 1600
 Set Padding 24
 Set Margin 32
 Set MarginFill "#6B50FF"
@@ -59,7 +59,7 @@ Enter
 # Claude edits app.py; the guard's xgrep review comes back with the existing
 # SQL injection, and Claude fixes it before the turn ends.
 Wait+Screen@180s /sql-injection|SQL injection/
-Wait+Screen@240s /\w+ for \d+s/
+Wait+Screen@240s /for (\d+m )?\d+s · done/
 Sleep 8s
 
 Hide

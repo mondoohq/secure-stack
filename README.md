@@ -77,7 +77,8 @@ gets a thin adapter under [`integrations/`](integrations/).
 ![secure-guard's inline xgrep review catching a SQL injection that Claude then fixes](mods/secure-guard/demo-inline-review.gif)
 
 <sub>Inline code review: asked only for a <code>/health</code> endpoint, Claude edits <code>app.py</code>,
-xgrep flags the SQL injection already in <code>/user</code>, and Claude fixes it in the same turn.</sub>
+Mondoo xgrep flags the SQL injection already in <code>/user</code> (the line under the edit), and Claude
+fixes it in the same turn.</sub>
 
 Every scan runs on your machine: commands and code are never uploaded, and the only downloads
 are the scanner and public policies, each announced when it happens

@@ -59,6 +59,7 @@ import {
   cnspecScanArgs, cnspecPolicySource, cnspecPolicyNotice, sarifFindings, iacAdvisoryText,
   parseJsonObject, IAC_TIMEOUT_MS,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
+  findingsNotice,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -450,17 +451,20 @@ async function codeAdvisory($, file) {
   if (b.mode === "unavailable") return null; // scanner not here — stay quiet (fail open)
   const findings = await scanFile($, b, file);
   if (!findings.length) return null;
-  announceFindings($, "xgrep", findings.length, file);
+  announceFindings($, "xgrep", findings, file);
   return `${advisoryText(file, findings)}\n${FP_HINT}`;
 }
 
 // announceFindings tells the user what the agent was just handed: advisories
 // reach the model as `context`, which the transcript doesn't show, so without
 // this the user sees the agent change code they didn't ask about with no
-// visible reason.
-function announceFindings($, engine, count, file) {
+// visible reason. A transcript line (kept, right under the edit) says what
+// Mondoo caught; a toast draws the eye to it.
+function announceFindings($, engine, findings, file) {
+  const n = findings.length;
   const base = String(file).split(/[\\/]/).pop();
-  $.ui.toast(`${engine} found ${count} issue${count === 1 ? "" : "s"} in ${base} — sent to Claude`);
+  $.ui.log(findingsNotice(engine, file, findings));
+  $.ui.toast(`Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base} — sent to Claude`);
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -585,7 +589,7 @@ async function iacAdvisory($, file, kind) {
   if (b.mode !== "ok") return null; // cnspec not installed — stay quiet
   const findings = await cnspecScan($, b, kind, file);
   if (!findings.length) return null;
-  announceFindings($, "cnspec", findings.length, file);
+  announceFindings($, "cnspec", findings, file);
   return iacAdvisoryText(file, kind, findings);
 }
 

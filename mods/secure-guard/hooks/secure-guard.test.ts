@@ -34,7 +34,7 @@ type Env = Record<string, string | undefined>;
 // fakeEngine registers the bottom hooks: files, env, processes, and the tool.
 // `files` is what $.fs.read sees; `scan` answers `xgrep scan` and `cnspec` the
 // cnspec scan (undefined = that scanner is not installed). Returns the argv log.
-function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; scan?: string; cnspec?: string; toasts?: string[] }) {
+function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; scan?: string; cnspec?: string; toasts?: string[]; logs?: string[] }) {
   const runs: string[][] = [];
   on("env.get", ($: any, e: any) => ({ value: opts.env?.[e.name] }));
   on("fs.read", ($: any, e: any) => {
@@ -59,7 +59,7 @@ function fakeEngine(on: any, opts: { files?: Record<string, string>; env?: Env; 
     return missing();
   });
   on("ui.toast", ($: any, e: any) => { opts.toasts?.push(String(e.text ?? "")); return { value: undefined }; });
-  on("ui.log", () => ({ value: undefined }));
+  on("ui.log", ($: any, e: any) => { opts.logs?.push(String(e.text ?? "")); return { value: undefined }; });
   on("tool.call", { tool: ["Write", "Edit", "MultiEdit"] }, ($: any, e: any) => ({
     result: { filePath: e.file_path, oldString: "", newString: "", originalFile: "", structuredPatch: [], userModified: false, replaceAll: false },
   }));
@@ -293,16 +293,27 @@ test("code advisories point the agent at the false-positive report", async ($, o
   expect(advisories(r)).toContain("report_false_positive");
 });
 
-test("findings handed to the agent are announced to the user with a toast", async ($, on) => {
+test("findings handed to the agent are shown to the user: transcript line + toast", async ($, on) => {
   const toasts: string[] = [];
-  fakeEngine(on, { scan: XGREP_SECRET, toasts });
+  const logs: string[] = [];
+  fakeEngine(on, { scan: XGREP_SECRET, toasts, logs });
   await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
-  expect(toasts.some((t) => t.includes("xgrep found 1 issue in app.py"))).toBe(true);
+  expect(logs).toContain("Mondoo xgrep found 1 issue in app.py: Hard-coded AWS access key (generic-aws-access-key), line 3. Sent to Claude to address.");
+  expect(toasts.some((t) => t.includes("Mondoo xgrep found 1 issue in app.py"))).toBe(true);
 });
 
-test("a clean file raises no toast", async ($, on) => {
+test("a clean file shows nothing", async ($, on) => {
   const toasts: string[] = [];
-  fakeEngine(on, { toasts });
+  const logs: string[] = [];
+  fakeEngine(on, { toasts, logs });
   await $.tool.call({ tool: "Write", file_path: "/w/app.py", content: "x = 1\n" } as any);
   expect(toasts.length).toBe(0);
+  expect(logs.length).toBe(0);
+});
+
+test("IaC findings are shown as Mondoo cnspec", async ($, on) => {
+  const logs: string[] = [];
+  fakeEngine(on, { cnspec: CNSPEC_FAIL, logs });
+  await $.tool.call({ tool: "Write", file_path: "/w/main.tf", content: "x\n" } as any);
+  expect(logs.some((l) => l.startsWith("Mondoo cnspec found 1 issue in main.tf: HIGH Container runs privileged"))).toBe(true);
 });

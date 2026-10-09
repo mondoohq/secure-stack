@@ -64,10 +64,11 @@ Wait+Screen@120s /Proceed/
 Sleep 5s
 
 # Cancel (hotkey 2) — the command never runs. Then wait for Claude's reply to
-# finish: Claude Code ends a turn with a "✻ <verb> for <N>s" line.
+# finish: Claude Code ends a turn with a "✻ <verb> for <N>s · done" line (the
+# "· done" matters: "thought for 1s" appears mid-turn).
 Type "2"
 Wait+Screen@120s /you pressed Cancel/
-Wait+Screen@120s /\w+ for \d+s/
+Wait+Screen@120s /for (\d+m )?\d+s · done/
 Sleep 7s
 
 Hide

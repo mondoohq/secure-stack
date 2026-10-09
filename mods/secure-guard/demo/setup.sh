@@ -31,6 +31,9 @@ fi
 REPO_DIR="$(dirname "$(dirname "$MOD_DIR")")"
 mkdir -p "$REPO_DIR/.demo/acme-app"
 cd "$REPO_DIR/.demo/acme-app" || return
+# Its own git repo, so Claude Code doesn't show the enclosing checkout's
+# branch or pull request in the recording's status bar.
+[ -d .git ] || git init -q
 
 claude() {
   command claude \

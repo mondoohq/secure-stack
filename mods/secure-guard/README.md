@@ -11,8 +11,9 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
   high-confidence findings back right after the tool result so the agent fixes them in the
   same turn. xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the
-  code. A toast tells you when findings were sent, so you can see why the agent touched code
-  you didn't ask about.
+  code. The transcript says what Mondoo caught — *"Mondoo xgrep found 1 issue in app.py: SQL
+  injection (python-sql-injection), line 15. Sent to Claude to address."* — right under the
+  edit, so you can see why the agent touched code you didn't ask about.
 
   ![secure-guard's inline xgrep review catching a SQL injection that Claude then fixes](demo-inline-review.gif)
 - **IaC policy guard (cnspec)** — after the agent writes or edits Terraform, a Dockerfile, or

@@ -469,3 +469,25 @@ export function fpIssueUrl({ title, body }) {
   const q = new URLSearchParams({ title, body, labels: FP_LABEL });
   return `https://github.com/${FP_REPO}/issues/new?${q.toString()}`;
 }
+
+// ─── What the user sees when findings go to the agent ────────────────────────
+
+const NOTICE_MAX_SHOWN = 3;
+
+// findingsNotice is the transcript line telling the user that a Mondoo scanner
+// caught something and handed it to the agent. Advisories reach the model as
+// hidden context, so this line is how the user sees what was caught and why the
+// agent is about to touch code they didn't ask about. `engine` is "xgrep"
+// (code findings: { rule, title, line }) or "cnspec" (policy findings:
+// { rule, severity, message }).
+export function findingsNotice(engine, file, findings) {
+  const list = Array.isArray(findings) ? findings : [];
+  const n = list.length;
+  const base = String(file ?? "").split(/[\\/]/).pop() || "the file";
+  const name = (f) => engine === "cnspec"
+    ? `${f?.severity ? `${String(f.severity).toUpperCase()} ` : ""}${f?.message || f?.rule || "policy check"} (${f?.rule ?? "policy"})`
+    : `${f?.title || f?.rule || "finding"} (${f?.rule ?? "finding"})${f?.line ? `, line ${f.line}` : ""}`;
+  const shown = list.slice(0, NOTICE_MAX_SHOWN).map(name).join("; ");
+  const more = n > NOTICE_MAX_SHOWN ? `; and ${n - NOTICE_MAX_SHOWN} more` : "";
+  return `Mondoo ${engine} found ${n} issue${n === 1 ? "" : "s"} in ${base}: ${shown}${more}. Sent to Claude to address.`;
+}
