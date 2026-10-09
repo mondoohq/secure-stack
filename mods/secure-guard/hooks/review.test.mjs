@@ -23,6 +23,7 @@ import {
   cnspecBundlesFor,
   extractJsonObject,
   parseJsonObject,
+  normalizeVerdict,
   alsoCodeScan,
   iacNeedsContent,
   cnspecPolicySource,
@@ -318,4 +319,31 @@ test("advisoryText / iacAdvisoryText: pre-write wording says the file was not wr
   const iac = iacAdvisoryText("main.tf", "terraform", [{ rule: "r", severity: "", message: "m" }], { written: false });
   assert.match(iac, /^Not written: cnspec policy found 1 issue\(s\) in main\.tf \(terraform\)\. Fix them/);
   assert.equal(combineAdvisories([iac, code]).match(/Not written/g).length, 1);
+});
+
+test("normalizeVerdict phrases findings itself, not xgrep's 'blocked … retry' summary", () => {
+  const v = normalizeVerdict({
+    decision: "deny",
+    summary: "xgrep guard blocked this action — sensitive data or a dangerous command:\n  - Pipe to shell (rule-a) in command at line 1\nRemove the flagged secret/PII or dangerous command and retry.",
+    findings: [{ rule: "rule-a", title: "Pipe to shell", line: 1 }],
+  });
+  assert.equal(v.flagged, "Pipe to shell (rule-a)");
+  assert.deepEqual(v.lines, ["Pipe to shell (rule-a)"]); // no padding for a missing severity
+  assert.doesNotMatch(v.flagged, /blocked|retry/);
+  assert.match(v.summary, /blocked this action/); // kept for the blocking adapters
+});
+
+test("normalizeVerdict: severity leads a line when present; several findings join", () => {
+  const v = normalizeVerdict({ findings: [
+    { rule: "r1", title: "Secret in command", severity: "high" },
+    { rule: "r2", title: "r2" },
+  ] });
+  assert.deepEqual(v.lines, ["HIGH · Secret in command (r1)", "r2"]);
+  assert.equal(v.flagged, "Secret in command (r1); r2");
+  assert.equal(v.decision, "ask");
+});
+
+test("normalizeVerdict: no findings falls back to the summary's first line, then a default", () => {
+  assert.equal(normalizeVerdict({ decision: "deny", summary: "Risky thing detected:\n  - detail" }).flagged, "Risky thing detected");
+  assert.equal(normalizeVerdict({ decision: "deny" }).flagged, "a risky command");
 });
