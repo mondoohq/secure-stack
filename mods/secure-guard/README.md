@@ -16,6 +16,9 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
   a Kubernetes / CloudFormation manifest, runs cnspec policy checks and hands violations back
   the same way. Terraform and Dockerfiles get the xgrep review too, so a hard-coded secret in
   `main.tf` is still caught.
+- **False-positive reports** — when the agent is confident an xgrep finding is wrong, it can
+  report it to this repo with a reproducible case so the rule gets fixed. You review the exact
+  issue and decide whether to file it ([details](#reporting-false-positives)).
 
 So xgrep runs in two complementary modes — **prevent secrets/PII leaving** (guard) and
 **enforce the OWASP Top 10 on code** (scan) — and cnspec adds IaC policy. This single routing
@@ -92,9 +95,32 @@ policy download in the session the first time each happens:
 | cnspec policy bundles, from [github.com/mondoohq/cnspec](https://github.com/mondoohq/cnspec/tree/main/content) | on an IaC scan, unless `CNSPEC_CONTENT_DIR` points at a local copy | down: policies only |
 | cnspec providers (e.g. its Terraform provider) | on an IaC scan, when cnspec's own `--auto-update` (on by default) finds one missing or outdated | down: cnspec's plugins |
 | scan results to your Mondoo Platform space | only with `CNSPEC_USE_PLATFORM=1` | up, by your choice |
+| a false-positive issue on [github.com/mondoohq/secure-stack](https://github.com/mondoohq/secure-stack/issues) (public) | only when you press **File issue** after reviewing it | up: a minimal repro written for the report, never your files |
 
 Installing xgrep (`npm i -g @mondoohq/xgrep`) and setting `CNSPEC_CONTENT_DIR` removes the
 first two. The provider check is cnspec's own behavior and follows its `--auto-update` setting.
+
+## Reporting false positives
+
+A rule that fires on correct code costs every user a detour, so the guard gives the agent a
+way to report it instead of "fixing" code that is already right. Every code finding the agent
+reads ends with a pointer to the mod's `report_false_positive` tool, which takes the rule id,
+the language, a **minimal snippet that still triggers the rule**, and why the finding is wrong.
+
+1. **Checked before you see it.** The mod runs
+   `xgrep scan --stdin --lang <language> --rule-id <rule> --json` on the snippet. A snippet
+   that doesn't trigger the rule, an unknown rule id, or an incomplete report goes back to the
+   agent to fix, so you only ever review reports a maintainer can reproduce.
+2. **You review the exact issue.** A pane shows the title, the reason, and the repro, and
+   **nothing is sent unless you press File issue**. The repo is public, so the agent is told
+   to write the snippet for the report and never paste your code, names, paths, or secrets.
+3. **Filed as you.** The mod runs `gh issue create --repo mondoohq/secure-stack` with the
+   `false-positive` label (without it, if the repo doesn't have the label). Without a working
+   [GitHub CLI](https://cli.github.com), the agent gives you a prefilled link to submit
+   yourself instead.
+
+The issue carries the rule id, xgrep version, the repro in a code block, the one-line command
+that reproduces it, and the reason, which is what a maintainer needs to adjust the rule.
 
 ## Trust
 

@@ -58,7 +58,20 @@ import {
   iacScanKind, iacNeedsContent, alsoCodeScan, combineAdvisories,
   cnspecScanArgs, cnspecPolicySource, cnspecPolicyNotice, sarifFindings, iacAdvisoryText,
   parseJsonObject, IAC_TIMEOUT_MS,
+  FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
 } from "./core.mjs";
+
+// The tool the agent calls to report an xgrep false positive (listed to the
+// model as mcp__secure-guard__report_false_positive).
+// (The tool.call matcher spells the full name out so `claude plugin validate`
+// can list it.)
+const FP_TOOL = "report_false_positive";
+// Appended to xgrep code advisories so the agent knows the way out of a wrong
+// finding exists — and that the user stays in control of it.
+const FP_HINT =
+  `If you are confident a finding is a false positive, explain why instead of changing correct ` +
+  `code, and you may offer to report it with the ${FP_TOOL} tool (the user reviews the issue ` +
+  `before anything is filed).`;
 
 const DOCS_URL = "https://mondoo.com/docs/xgrep/ai-agents/guard-hooks"; // what the guard does
 const NPM_URL = "https://www.npmjs.com/package/@mondoohq/xgrep"; // where the binary comes from
@@ -96,7 +109,42 @@ export function register(on) {
     } catch {
       // name already taken — fine
     }
+    try {
+      await $.tool.register({
+        name: FP_TOOL,
+        description:
+          `Report an xgrep finding you are confident is a false positive as an issue on ` +
+          `github.com/${FP_REPO} (public), so the rule can be fixed. Provide a MINIMAL, ` +
+          `SELF-CONTAINED snippet written for the report that still triggers the rule — never ` +
+          `paste the user's own code, names, paths, or secrets. The snippet is checked with ` +
+          `xgrep first; the user then sees the exact issue and decides whether to file it.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            rule: { type: "string", description: "The finding's rule id, e.g. python-sql-injection." },
+            language: { type: "string", description: "The snippet's language as xgrep names it: python, javascript, typescript, go, java, …" },
+            snippet: { type: "string", description: "A minimal synthetic reproduction (a few lines) that still triggers the rule but is safe/correct code." },
+            reason: { type: "string", description: "Why the finding is a false positive: what makes this code safe." },
+            expected: { type: "string", description: "Optional: what the rule should do instead." },
+          },
+          required: ["rule", "language", "snippet", "reason"],
+        },
+      });
+    } catch {
+      // registration unavailable here — the rest of the guard still works
+    }
     return next(e);
+  });
+
+  // False-positive reports: verify the reproduction, let the user review the
+  // exact issue, and only then file it. Never fails the session: any error
+  // becomes a "not filed" answer the agent can relay.
+  on("tool.call", { tool: "mcp__secure-guard__report_false_positive" }, async ($, e, next) => {
+    try {
+      return { result: await reportFalsePositive($, e, next) };
+    } catch (err) {
+      return { result: `Not filed: secure-guard hit an error (${err?.message ?? err}).` };
+    }
   });
 
   // A /secure-guard command the user can run to see (and re-resolve) the engines.
@@ -189,31 +237,8 @@ async function guardBashCall($, e, next) {
     }
 
     // Risky → hold the call behind a pane until the user decides.
-    while (held !== null) {
-      if (next.signal.aborted) return denyResult("the turn was interrupted", verdict);
-      await $.process.run(["sleep", POLL], { timeoutMs: 5000 });
-    }
-    const mine = { command, verdict, decision: null, where: "pane" };
-    held = mine;
-    let opened = { isPlaced: false };
-    try {
-      opened = await $.ui.open({ id: PANE_ID, title: "xgrep guard", focus: true, rows: paneRows(verdict) });
-      if (!opened.isPlaced) mine.where = "band";
-      $.ui.invalidate("ui.render");
-
-      const start = await $.clock.now();
-      while (mine.decision === null) {
-        if (next.signal.aborted) { mine.decision = "interrupted"; break; }
-        if ((await $.clock.now()) - start > HOLD_LIMIT_MS) { mine.decision = "timeout"; break; }
-        await $.process.run(["sleep", POLL], { timeoutMs: 5000 });
-      }
-    } catch {
-      mine.decision = "error";
-    } finally {
-      try { if (opened.isPlaced) await $.ui.close({ id: PANE_ID }); } catch {}
-      if (held === mine) held = null;
-      $.ui.invalidate("ui.render");
-    }
+    const mine = { kind: "command", command, verdict };
+    await awaitDecision($, next.signal, mine, { title: "xgrep guard", rows: paneRows(verdict) });
 
     if (mine.decision === "proceed") {
       $.ui.toast("xgrep guard: running it");
@@ -226,6 +251,39 @@ async function guardBashCall($, e, next) {
       error: "xgrep guard hit an error while holding it",
     }[mine.decision] ?? "no answer was recorded";
     return denyResult(why, verdict);
+  }
+}
+
+// awaitDecision shows `mine` in the pane (or the band above the prompt when the
+// pane can't be placed) and waits until the user presses a button, the turn is
+// interrupted, or HOLD_LIMIT_MS passes; it sets mine.decision. One request is
+// shown at a time; a second waits for the first. `mine.kind` picks the drawing.
+async function awaitDecision($, signal, mine, { title, rows }) {
+  mine.decision = null;
+  mine.where = "pane";
+  while (held !== null) {
+    if (signal.aborted) { mine.decision = "interrupted"; return; }
+    await $.process.run(["sleep", POLL], { timeoutMs: 5000 });
+  }
+  held = mine;
+  let opened = { isPlaced: false };
+  try {
+    opened = await $.ui.open({ id: PANE_ID, title, focus: true, rows });
+    if (!opened.isPlaced) mine.where = "band";
+    $.ui.invalidate("ui.render");
+
+    const start = await $.clock.now();
+    while (mine.decision === null) {
+      if (signal.aborted) { mine.decision = "interrupted"; break; }
+      if ((await $.clock.now()) - start > HOLD_LIMIT_MS) { mine.decision = "timeout"; break; }
+      await $.process.run(["sleep", POLL], { timeoutMs: 5000 });
+    }
+  } catch {
+    mine.decision = "error";
+  } finally {
+    try { if (opened.isPlaced) await $.ui.close({ id: PANE_ID }); } catch {}
+    if (held === mine) held = null;
+    $.ui.invalidate("ui.render");
   }
 }
 
@@ -391,7 +449,7 @@ async function codeAdvisory($, file) {
   const b = await ensureBackend($);
   if (b.mode === "unavailable") return null; // scanner not here — stay quiet (fail open)
   const findings = await scanFile($, b, file);
-  return findings.length ? advisoryText(file, findings) : null;
+  return findings.length ? `${advisoryText(file, findings)}\n${FP_HINT}` : null;
 }
 
 // scanFile runs xgrep over one file and returns the high-confidence security
@@ -406,6 +464,68 @@ async function scanFile($, b, file) {
   let doc;
   try { doc = JSON.parse(out); } catch { return []; }
   return highConfidenceFindings(doc);
+}
+
+// ─── False-positive reports ──────────────────────────────────────────────────
+
+// reportFalsePositive answers the report_false_positive tool with the text the
+// agent reads. Order matters: validate, prove the snippet reproduces, THEN show
+// the user the exact issue — so they never review a report that wouldn't help
+// a maintainer — and file only on their say-so. Nothing leaves the machine
+// before that press.
+async function reportFalsePositive($, e, next) {
+  const problems = validateFpReport(e);
+  if (problems.length) return `Not filed — fix the report and call again:\n- ${problems.join("\n- ")}`;
+  const rule = String(e.rule).trim();
+  const language = String(e.language).trim();
+  const snippet = String(e.snippet);
+
+  const b = await ensureBackend($);
+  if (b.mode === "unavailable") return `Not filed: xgrep isn't available to check the reproduction (${b.reason}).`;
+  const run = await $.process.run([...b.cmd, ...fpReproArgs(rule, language)], { stdin: snippet, timeoutMs: REVIEW_TIMEOUT_MS });
+  const doc = parseJsonObject(run.stdout ?? "");
+  if (!doc) {
+    const why = String(run.stderr ?? "").trim().split("\n")[0] || `exit code ${run.exitCode}`;
+    return `Not filed: xgrep could not check the snippet (${why}). Check the rule id and language.`;
+  }
+  if (!fpReproduces(doc, rule)) {
+    return `Not filed: the snippet does not trigger ${rule}, so it wouldn't reproduce the false positive. ` +
+      `Write a minimal snippet that still triggers ${rule} and call again.`;
+  }
+
+  const issue = fpIssue({ rule, language, snippet, reason: e.reason, expected: e.expected, xgrepVersion: doc.version });
+  const mine = { kind: "report", rule, language, snippet, reason: String(e.reason).trim(), issue };
+  await awaitDecision($, next.signal, mine, { title: "Report a false positive", rows: 18 });
+  if (mine.decision !== "file") {
+    const why = { cancel: "the user pressed Cancel", timeout: "no answer within 10 minutes", interrupted: "the turn was interrupted" }[mine.decision]
+      ?? "the review didn't complete";
+    return `Not filed: ${why}. Don't report it again unless the user asks.`;
+  }
+  return await fileIssue($, issue);
+}
+
+// fileIssue files with the GitHub CLI (the user's own account), with the
+// false-positive label when the repo has it. Without a working `gh`, it hands
+// back a prefilled link for the user to submit themselves.
+async function fileIssue($, issue) {
+  const create = (withLabel) => $.process.run(
+    ["gh", "issue", "create", "--repo", FP_REPO, "--title", issue.title, "--body-file", "-", ...(withLabel ? ["--label", FP_LABEL] : [])],
+    { stdin: issue.body, timeoutMs: 60000 },
+  );
+  let run;
+  try {
+    run = await create(true);
+    if (run.exitCode !== 0 && /label/i.test(run.stderr ?? "")) run = await create(false);
+  } catch (err) {
+    run = { exitCode: 127, stdout: "", stderr: String(err?.message ?? err) };
+  }
+  const url = (String(run.stdout ?? "").match(/https:\/\/github\.com\/\S+\/issues\/\d+/) ?? [])[0];
+  if (run.exitCode === 0 && url) {
+    $.ui.toast(`secure-guard: filed ${url}`);
+    return `Filed ${url}. Tell the user, and keep the code as it is.`;
+  }
+  const why = String(run.stderr ?? "").trim().split("\n")[0] || "the GitHub CLI isn't available";
+  return `Not filed automatically (${why}). Give the user this link to review and submit it themselves:\n${fpIssueUrl(issue)}`;
 }
 
 // ─── cnspec (IaC policy) engine ──────────────────────────────────────────────
@@ -486,6 +606,47 @@ function paneRows(v) {
 // lists what xgrep flagged in its own words (not xgrep's "blocked … retry"
 // summary, which is written for a hook that blocks outright).
 function draw(t, state) {
+  return state.kind === "report" ? drawReport(t, state) : drawCommand(t, state);
+}
+
+// drawReport previews the issue exactly as it would be filed — the user is the
+// one publishing it, to a public repo.
+function drawReport(t, state) {
+  const { Box, Text, Button } = t;
+  const decide = (choice) => () => { if (state.decision === null) state.decision = choice; };
+  const shown = state.snippet.replace(/\s+$/, "").split("\n");
+  const snippet = shown.slice(0, 8).map((line, i) => Text({ key: `s${i}`, wrap: "truncate-end", children: `  ${line}` }));
+  if (shown.length > 8) snippet.push(Text({ key: "more", dimColor: true, children: `  … ${shown.length - 8} more line(s)` }));
+  const row = (key, label, value) => Text({ key, wrap: "truncate-end", children: [Text({ dimColor: true, children: label }), Text({ children: value })] });
+  return Box({
+    flexDirection: "column",
+    borderStyle: "round",
+    borderColor: "cyan",
+    paddingX: 1,
+    children: [
+      Text({ key: "title", children: [
+        Text({ bold: true, color: "cyan", children: "Report a false positive " }),
+        Text({ dimColor: true, children: `to github.com/${FP_REPO} (public)` }),
+      ] }),
+      row("t", "Title    ", state.issue.title),
+      row("r", "Why      ", state.reason.split("\n")[0]),
+      Text({ key: "rh", dimColor: true, children: "Repro    (checked: still triggers the rule)" }),
+      Box({ key: "snip", flexDirection: "column", children: snippet }),
+      Box({
+        key: "buttons",
+        marginTop: 1,
+        gap: 2,
+        children: [
+          Button({ key: "file", label: "File issue", hotkey: "1", plain: true, onPress: decide("file") }),
+          Button({ key: "cancel", label: "Cancel", hotkey: "2", plain: true, autoFocus: true, onPress: decide("cancel") }),
+          Text({ key: "hint", dimColor: true, children: "nothing is sent unless you file it" }),
+        ],
+      }),
+    ],
+  });
+}
+
+function drawCommand(t, state) {
   const { Box, Text, Button } = t;
   const { verdict } = state;
   const list = (verdict.lines?.length ? verdict.lines : [verdict.flagged]).map((line, i) =>

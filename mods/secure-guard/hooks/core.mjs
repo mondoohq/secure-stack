@@ -384,3 +384,88 @@ export function iacAdvisoryText(file, kind, findings, { written = true } = {}) {
     : "";
   return `${head}\n${body}${more}`;
 }
+
+// ─── False-positive reports ──────────────────────────────────────────────────
+//
+// When the agent is confident an xgrep finding is a false positive, it can
+// report it as an issue on this repo so the rule gets adjusted. A report must be
+// actionable: a MINIMAL, SELF-CONTAINED snippet that still triggers the rule
+// (verified with `xgrep scan --stdin` before anything is filed), the rule id,
+// the xgrep version, and why the finding is wrong. The repo is public, so the
+// snippet must be written for the report — never the user's own code — and
+// the user sees the exact issue and confirms before it is filed.
+
+export const FP_REPO = "mondoohq/secure-stack";
+export const FP_LABEL = "false-positive";
+const FP_MAX_SNIPPET_LINES = 60;
+const FP_MAX_SNIPPET_CHARS = 4000;
+const FP_MAX_REASON_CHARS = 2000;
+
+// validateFpReport checks the agent's input; returns a list of problems, each
+// phrased so the agent can fix its call (empty = valid).
+export function validateFpReport(input) {
+  const problems = [];
+  const rule = String(input?.rule ?? "").trim();
+  const language = String(input?.language ?? "").trim();
+  const snippet = String(input?.snippet ?? "");
+  const reason = String(input?.reason ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(rule)) problems.push("`rule` must be the finding's rule id, e.g. python-sql-injection");
+  if (!/^[A-Za-z0-9#+_-]+$/.test(language)) problems.push("`language` must be the snippet's language as xgrep names it, e.g. python, javascript, go");
+  if (snippet.trim() === "") problems.push("`snippet` must be a minimal, self-contained reproduction");
+  else if (snippet.length > FP_MAX_SNIPPET_CHARS || snippet.split("\n").length > FP_MAX_SNIPPET_LINES) {
+    problems.push(`\`snippet\` must be minimal: at most ${FP_MAX_SNIPPET_LINES} lines and ${FP_MAX_SNIPPET_CHARS} characters`);
+  }
+  if (reason === "") problems.push("`reason` must say why the finding is a false positive");
+  else if (reason.length > FP_MAX_REASON_CHARS) problems.push(`\`reason\` must be at most ${FP_MAX_REASON_CHARS} characters`);
+  return problems;
+}
+
+// fpReproArgs is the xgrep argv that checks the snippet (on stdin) still
+// triggers the rule — the same command the issue tells a maintainer to run.
+export function fpReproArgs(rule, language) {
+  return ["scan", "--stdin", "--lang", language, "--rule-id", rule, "--json"];
+}
+
+// fpReproduces reports whether a parsed `xgrep scan --json` result holds a
+// finding for `rule`.
+export function fpReproduces(doc, rule) {
+  const results = Array.isArray(doc?.results) ? doc.results : [];
+  return results.some((m) => m?.check_id === rule);
+}
+
+// fpIssue renders the issue title and body. The code fence is longer than any
+// run of backticks in the snippet, so a snippet can't break out of it.
+export function fpIssue({ rule, language, snippet, reason, expected, xgrepVersion }) {
+  const longest = Math.max(0, ...(String(snippet).match(/`+/g) ?? []).map((r) => r.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  const title = `False positive: ${rule} (${language})`;
+  const body = [
+    `**Rule:** \`${rule}\`  `,
+    `**Language:** ${language}  `,
+    `**xgrep:** ${xgrepVersion || "unknown"}`,
+    "",
+    "### Reproduction",
+    "",
+    `${fence}${language}`,
+    String(snippet).replace(/\s+$/, ""),
+    fence,
+    "",
+    `\`xgrep ${fpReproArgs(rule, language).join(" ")} < repro\` reports \`${rule}\` on this snippet (checked before filing).`,
+    "",
+    "### Why this is a false positive",
+    "",
+    String(reason).trim(),
+    ...(String(expected ?? "").trim() ? ["", "### Expected", "", String(expected).trim()] : []),
+    "",
+    "---",
+    "Reported from the secure-guard mod after the user reviewed it. The snippet is a minimal reproduction written for this report.",
+  ].join("\n");
+  return { title, body };
+}
+
+// fpIssueUrl is the prefilled new-issue link — the fallback when the GitHub CLI
+// can't file it. Nothing is sent until the user opens the link and submits.
+export function fpIssueUrl({ title, body }) {
+  const q = new URLSearchParams({ title, body, labels: FP_LABEL });
+  return `https://github.com/${FP_REPO}/issues/new?${q.toString()}`;
+}
