@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.1.0 - 2026-10-09
+
+- fix(release): let a re-run of prepare-release refresh its release PR (#44)
+- fix(release): commit the stamped mod manifests in the release PR (#43)
+- docs(readme): describe the shell guard's xgrep 0.84 coverage (#42)
+- docs(readme): lead with what Secure Stack does for you, and say only what it does (#37)
+- feat(secure-guard): tell the user when xgrep is outdated, and update it on /secure-guard update (#39)
+- fix(secure-guard): call the native xgrep, not npx, on every scan; report a failing scan once (#38)
+- docs(secure-guard): add an inline-review demo, and toast when findings go to the agent (#36)
+- feat(secure-guard): let the agent report xgrep false positives as reproducible issues (#35)
+- docs(readme): lead with the guard demo, add a quick start, and fix what the README got wrong (#34)
+- docs(secure-guard): add a demo of the shell guard holding a piped installer (#33)
+- fix(secure-guard): say the command is held, and name what xgrep flagged in the mod's own words (#32)
+- docs(secure-guard): say what runs locally, what crosses the network, and how to review the mod (#31)
+- feat(integrations): bring the Codex/Vibe/Pi/opencode adapters up to the mod's guarantees (#30)
+- feat(secure-guard): review IaC edits, scan Terraform/Dockerfiles with both engines, and say where policies come from (#29)
+- fix(secure-guard): deliver inline findings beside the tool result, and await env.get (#28)
+- fix(secure-guard): list the mod in the marketplace and version it with the release (#27)
+
+
 ## v2.0.1 - 2026-10-08
 
 - fix(release): give the release job contents:write via the top-level permissions (#25)
