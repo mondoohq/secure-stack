@@ -1,107 +1,102 @@
-# Secure your stack with AI agents
+# Secure Stack
 
-![secure-guard holding a piped installer in Claude Code until the user decides](mods/secure-guard/demo.gif)
+**Security checks for AI coding agents, on your machine, while the agent works.**
 
-<sub>The <a href="#runtime-guard--as-the-agent-works">runtime guard</a> in Claude Code: the agent
-tries to pipe a remote installer into a shell, xgrep holds the command until you decide, and
-nothing runs on Cancel. Every scan runs on your machine.</sub>
+![Secure Stack holding a piped remote installer in Claude Code until the user decides](mods/secure-guard/demo.gif)
 
-The tools AI coding agents use to secure software end to end — the **code they write** and the
-**systems you run**. Two engines do the work: **xgrep** for code (SAST, SCA, secrets) and
-**cnspec** for posture & policy (OS, cloud, SaaS, AI, and IaC). This repo layers three things
-over them for an agent:
+Your coding agent runs shell commands, writes code, and changes infrastructure faster than
+anyone can review it. Secure Stack puts Mondoo's security engines into the agent's loop —
+[**xgrep**](https://xgrep.ai) for code and [**cnspec**](https://github.com/mondoohq/cnspec)
+for configuration and posture — so risky actions are caught *before* they do damage, and
+the agent fixes what it got wrong while it is still working on it.
 
-- **Skills** — outcome-named instruction packs in two families: *secure development* (the code
-  lifecycle) and *secure posture* (the stack you run).
-- **A runtime guard** — the `secure-guard` mod + per-agent adapters that check an agent's
-  tool calls with both engines as it works.
-- **An OWASP coverage spine** — [`docs/owasp.md`](docs/owasp.md) maps every capability to OWASP
-  Top 10:2025 and the OWASP Top 10 for LLM & GenAI 2025, including the gaps.
+## What it does for you
 
-Compatible with Claude Code, Codex, Gemini CLI, Cursor, and more; skills follow the standardized
-[Agent Skills](https://agentskills.io/home) format.
+### Stops risky commands before they run
 
-> [!TIP]
-> If your agent doesn't support skills, you can use [`agents/SKILLS.md`](agents/SKILLS.md) directly as a fallback — it's a generated bundle of the skill instructions. To work *on* this repo, an agent should read the root [`AGENTS.md`](AGENTS.md) ([agents.md](https://agents.md/) convention).
+Every shell command the agent wants to run is checked first. A remote script piped into a
+shell, credential or SSH-key files about to be sent to a remote host, an `rm -rf` of your
+home directory: the command is **held** and you choose Proceed or Cancel (above). Everything
+else runs without a prompt.
 
-## Quick start (Claude Code)
+### Catches vulnerabilities as code is written — and gets them fixed
+
+After every file the agent writes or edits, xgrep reviews it: SQL and command injection,
+XSS, path traversal, SSRF, insecure deserialization, weak crypto, hard-coded secrets.
+Terraform, Dockerfiles, Kubernetes and CloudFormation get cnspec's policy checks.
+Findings go straight back to the agent, which fixes them in the same turn, and the transcript
+tells you what was caught.
+
+![Secure Stack's inline review catching a SQL injection that Claude then fixes](mods/secure-guard/demo-inline-review.gif)
+
+<sub>Asked only for a <code>/health</code> endpoint, Claude edits <code>app.py</code>; Mondoo xgrep
+flags the SQL injection already in <code>/user</code>, and Claude fixes it before the turn ends.</sub>
+
+### Security work on demand, in plain words
+
+Skills teach the agent to drive the same engines for bigger jobs:
+
+| Ask your agent | It uses |
+|----------------|---------|
+| *"Scan this repo for vulnerabilities before I merge."* | `secure-pipeline` |
+| *"Is the SQL injection finding in `api/users.go` real?"* | `triage-findings` |
+| *"Fix the confirmed findings and show each fix holds."* | `fix-findings` |
+| *"Where is user input validated in this service, and what calls it?"* | `understand-code` |
+| *"Write a rule that catches our unsafe `exec` wrapper."* | `author-detections` |
+| *"Audit my AWS account against CIS."* | `secure-cloud` |
+| *"Check our GitHub org's security settings."* | `secure-saas` |
+
+### Private by design
+
+Every scan runs on your machine. Your code and commands are never uploaded, nothing is
+evaluated server-side, and there's no per-command network round-trip slowing the agent down.
+The only downloads are the scanner and public policies, each announced when it happens
+([details](mods/secure-guard/README.md#local-by-design)). When xgrep flags correct code, the
+agent can report the false positive with a reproducible case — you review the exact issue and
+nothing is sent unless you file it.
+
+## Get started (Claude Code)
 
 ```shell
 /plugin marketplace add mondoohq/secure-stack
-/plugin install secure-guard@secure-stack      # the runtime guard from the demo above
+/plugin install secure-guard@secure-stack      # checks commands and code as the agent works
 /plugin install secure-pipeline@secure-stack   # scan → triage → fix before you merge
 ```
 
-The guard loads in your next session; run `/secure-guard` there to see it reach its scanners.
-It fetches xgrep from npm on first use if it isn't installed (announced, never silent). Then
-ask in plain words, for example *"scan this repo for vulnerabilities and fix the real ones"*.
-Other agents, and the full list of skills: [Installation](#installation).
+The guard is active from your next session — run `/secure-guard` to see it reach its
+scanners. It fetches xgrep on first use if it isn't installed (announced, never silent);
+install [cnspec](https://mondoo.com/docs/cnspec/install) as well to add the IaC checks. Then
+work as usual, or ask for something from the table above. Other agents:
+[Works with your agent](#works-with-your-agent).
 
-## What's included
+## What it covers
 
-### Secure development — the code lifecycle
+| Area | What gets checked | When | Engine |
+|------|-------------------|------|--------|
+| **Code** | Injection (SQL, command, code), XSS, path traversal, SSRF, insecure deserialization, weak crypto — taint analysis in ~38 languages · hard-coded secrets (166 families) | as the agent writes it | xgrep |
+| **Dependencies** | Known-vulnerable packages (SCA, 12+ ecosystems) · SBOM / CBOM / AIBOM | on demand (`secure-pipeline`) | xgrep |
+| **Infrastructure as code** | Terraform, CloudFormation, Dockerfile, Kubernetes against 89 policy bundles | as the agent writes it | cnspec |
+| **Commands** | Pipe-to-shell installers, `rm -rf` of home or root, credential and key files sent to a remote host | before they run | xgrep |
+| **Systems you run** | Linux / macOS / Windows hosts, container images, network devices · AWS, Azure, GCP, Kubernetes · GitHub, GitLab, Okta, Google Workspace, Microsoft 365, Slack, Atlassian, Snowflake · OpenAI, Anthropic, vLLM, Databricks AI, vector stores, approved agents and MCP servers | on demand (skills) | cnspec |
 
-Outcome-named skills, in the order you meet them (the root [`AGENTS.md`](AGENTS.md) maps the
-full set of layers; the OWASP mapping lives in the [coverage matrices](docs/owasp.md)):
+Measured against **OWASP Top 10:2025** — 8 of 10 categories covered strongly, A10 partially,
+and A06 *Insecure Design* stated plainly as out of reach for static tools — and the **OWASP Top
+10 for LLM & GenAI 2025**. Every claim is in the [coverage matrices](docs/owasp.md), with the
+honest gaps.
 
-- **`understand-code`** — *understand it first*: map an unfamiliar codebase, find definitions/callers, trace call chains, assess a change's blast radius.
-- **`secure-coding`** — *write it safely*: avoid vulnerable patterns while writing/reviewing code, aligned to OWASP Top 10:2025.
-- **`secure-pipeline`** — *ship it safely*: scan → gate → fix across code (xgrep) and IaC/config (cnspec) before a change merges.
-- **`triage-findings`** — *is it real?*: classify scan findings as true/false positives via code-graph dataflow.
-- **`fix-findings`** — *fix it, provably*: remediate one finding or a whole set through the verify/apply harness.
-- **`author-detections`** — *catch what nothing else catches*: author a custom, tested detection rule, or port one to new languages.
+## Works with your agent
 
-These drive the `xgrep` CLI (and `cnspec` for IaC); install xgrep via
-[Getting Started](https://mondoo.com/docs/xgrep/getting-started/).
+| Agent | Skills | Runtime guard |
+|-------|--------|---------------|
+| **Claude Code** | ✅ plugin marketplace | ✅ `secure-guard` mod — holds commands, reviews code after each write |
+| **OpenAI Codex** | ✅ `.agents/skills` | ✅ pre-tool hook — blocks (or asks) before the tool runs |
+| **Gemini CLI** | ✅ extension | — |
+| **Cursor** | ✅ plugin manifests | — |
+| **Mistral Vibe**, **Pi**, **opencode** | — | ✅ pre-tool hook / extension / plugin |
 
-### Secure posture — what you run
-
-Outcome-named skills that invoke [cnspec](https://github.com/mondoohq/cnspec) to audit the
-posture of your running stack against CIS / vendor / OWASP frameworks. They need `cnspec`
-([install](https://mondoo.com/docs/cnspec/install)) plus access/credentials to the target:
-
-- **`secure-os`** — *hosts & devices*: scan a Linux/macOS/Windows host, container image, or network device against CIS/vendor benchmarks.
-- **`secure-cloud`** — *cloud accounts*: scan AWS, Azure, GCP, and Kubernetes against CIS foundations and Mondoo cloud policies.
-- **`secure-saas`** — *SaaS & identity*: scan GitHub, GitLab, Okta, Google Workspace, Microsoft 365, Slack, Atlassian, Snowflake.
-- **`secure-ai-services`** — *AI*: scan OpenAI, Anthropic, vLLM, Databricks AI, vector stores, and govern approved AI agents / MCP servers.
-
-### Runtime guard — as the agent works
-
-The skills guide an agent; the **guard** checks it. This repo ships
-[`secure-guard`](mods/secure-guard) — a mod that routes each tool call to the right
-engine before it lands: **xgrep** for secrets/PII + dangerous commands (shell) and OWASP Top
-10 / SAST / secrets (code), and **cnspec** for IaC policy (Terraform, Dockerfile, Kubernetes,
-CloudFormation). The routing and finding logic lives once in a shared core/engine; each agent
-gets a thin adapter under [`integrations/`](integrations/).
-
-![secure-guard's inline xgrep review catching a SQL injection that Claude then fixes](mods/secure-guard/demo-inline-review.gif)
-
-<sub>Inline code review: asked only for a <code>/health</code> endpoint, Claude edits <code>app.py</code>,
-Mondoo xgrep flags the SQL injection already in <code>/user</code> (the line under the edit), and Claude
-fixes it in the same turn.</sub>
-
-Every scan runs on your machine: commands and code are never uploaded, and the only downloads
-are the scanner and public policies, each announced when it happens
-([details](mods/secure-guard/README.md#local-by-design)).
-
-<!-- BEGIN_INTEGRATIONS_TABLE -->
-| Agent | Shape | Install | Posture |
-|-------|-------|---------|---------|
-| **Claude Code** | in-process mod | `/plugin install secure-guard@secure-stack` | shell held until you choose Proceed / Cancel; code + IaC findings fed back after the write |
-| **OpenAI Codex** | external pre-tool hook | `node integrations/codex/install.mjs` | shell block or ask; code + IaC block (pre-write) |
-| **Mistral Vibe** | external pre-tool hook | `node integrations/vibe/install.mjs` | shell + code + IaC deny (pre-write) |
-| **Pi** | in-process TS extension | load `integrations/pi` as a Pi extension | block (pre-write); `ask` blocks too until a `ctx.ui.confirm` prompt is wired |
-| **opencode** | in-process TS plugin | copy `plugin.ts` into `.opencode/plugins/` | deny via throw (pre-write); no native `ask` |
-<!-- END_INTEGRATIONS_TABLE -->
-
-It needs `xgrep` (shell + code; auto-fetched from npm if not installed) and, for the IaC leg,
-`cnspec` ([install](https://mondoo.com/docs/cnspec/install)). Everything is fail-open — a
-missing or erroring scanner never wedges the agent. See [`integrations/README.md`](integrations/README.md)
-for per-agent install and testing.
-
-> xgrep also ships its own lightweight built-in hook (`xgrep guard install --agent claude|codex`,
-> secrets/PII + dangerous-command only) — see [Guard hooks](https://mondoo.com/docs/xgrep/ai-agents/guard-hooks/).
-> The `secure-guard` mod above is the richer, cross-agent, both-engines option.
+Step-by-step setup for each is under [Installation](#installation); the guard's per-agent
+details are in [`integrations/`](integrations/README.md). If your agent doesn't load skills,
+[`agents/SKILLS.md`](agents/SKILLS.md) is the same instructions as one file.
 
 ## Installation
 
@@ -181,34 +176,10 @@ This repository includes Cursor plugin manifests:
 
 Install from repository URL or local checkout via the Cursor plugin flow.
 
-### Other agents (runtime guard)
 
-The guard also runs in Mistral Vibe, Pi, and opencode — see the
-[runtime guard table](#runtime-guard--as-the-agent-works) and
-[`integrations/README.md`](integrations/README.md).
+## Reference
 
-## Usage
-
-The skills activate on their own when a request matches — just ask in plain words:
-
-| Ask | Skill |
-|-----|-------|
-| *"Where is user input validated in this service, and what calls it?"* | `understand-code` |
-| *"Scan this repo for vulnerabilities before I merge."* | `secure-pipeline` |
-| *"Is the SQL injection finding in `api/users.go` real?"* | `triage-findings` |
-| *"Fix the confirmed findings and show each fix holds."* | `fix-findings` |
-| *"Write a rule that catches our unsafe `exec` wrapper."* | `author-detections` |
-| *"Audit my AWS account against CIS."* | `secure-cloud` |
-| *"Check our GitHub org's security settings."* | `secure-saas` |
-
-You can also invoke a skill directly:
-
-```shell
-/triage-findings
-/author-detections
-```
-
-## Available Skills
+### All skills
 
 <!-- BEGIN_SKILLS_TABLE -->
 | Name | Description | Documentation |
@@ -224,6 +195,34 @@ You can also invoke a skill directly:
 | `triage-findings` | Decide whether a security finding is real — classify xgrep scan results as true or false positives by tracing dataflow and call chains with the code graph | [SKILL.md](skills/triage-findings/SKILL.md) |
 | `understand-code` | Understand an unfamiliar codebase before you change it — map structure, find definitions/callers, trace call chains, and assess a change's blast radius with xgrep's AST code graph | [SKILL.md](skills/understand-code/SKILL.md) |
 <!-- END_SKILLS_TABLE -->
+
+Two families: *secure development* follows the code lifecycle (understand → write → ship →
+triage → fix, plus authoring detections) and drives xgrep (and cnspec for IaC); *secure
+posture* audits what you run with cnspec and needs credentials to the target. Install xgrep
+via [Getting Started](https://mondoo.com/docs/xgrep/getting-started/) and cnspec via its
+[install guide](https://mondoo.com/docs/cnspec/install). Invoke a skill directly with
+`/<name>`, e.g. `/triage-findings`.
+
+### The runtime guard
+
+[`secure-guard`](mods/secure-guard) routes each tool call to the right engine before it lands:
+xgrep for shell commands and code, cnspec for IaC. The routing and finding logic lives once in
+a shared core; each agent gets a thin adapter under [`integrations/`](integrations/).
+
+<!-- BEGIN_INTEGRATIONS_TABLE -->
+| Agent | Shape | Install | Posture |
+|-------|-------|---------|---------|
+| **Claude Code** | in-process mod | `/plugin install secure-guard@secure-stack` | shell held until you choose Proceed / Cancel; code + IaC findings fed back after the write |
+| **OpenAI Codex** | external pre-tool hook | `node integrations/codex/install.mjs` | shell block or ask; code + IaC block (pre-write) |
+| **Mistral Vibe** | external pre-tool hook | `node integrations/vibe/install.mjs` | shell + code + IaC deny (pre-write) |
+| **Pi** | in-process TS extension | load `integrations/pi` as a Pi extension | block (pre-write); `ask` blocks too until a `ctx.ui.confirm` prompt is wired |
+| **opencode** | in-process TS plugin | copy `plugin.ts` into `.opencode/plugins/` | deny via throw (pre-write); no native `ask` |
+<!-- END_INTEGRATIONS_TABLE -->
+
+Everything is fail-open — a missing or erroring scanner never wedges the agent. xgrep also
+ships a lightweight built-in hook (`xgrep guard install --agent claude|codex`, secrets/PII and
+dangerous commands only — see [Guard hooks](https://mondoo.com/docs/xgrep/ai-agents/guard-hooks/));
+`secure-guard` is the richer, cross-agent, both-engines option.
 
 ## Contributing
 
