@@ -1,7 +1,7 @@
 {
   "name": "secure-stack",
   "description": "Tools AI coding agents use to secure your stack: code with xgrep, posture and policy with cnspec",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "author": {
     "name": "Mondoo"
   },
