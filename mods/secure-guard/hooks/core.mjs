@@ -571,3 +571,16 @@ export function xgrepUpdateArgv(prefix) {
     ? ["npm", "--prefix", prefix, "install", "-g", `${XGREP_NPM}@latest`]
     : ["npm", "install", "-g", `${XGREP_NPM}@latest`];
 }
+
+// parseVersionJSON reads `xgrep version --json --check-update` (xgrep with
+// mondoohq/xgrep#3238): { version, update } where update is
+// { current, latest } when a newer release is out, else null. null when the
+// output isn't that document (an older xgrep — fall back to the text form).
+export function parseVersionJSON(stdout) {
+  const doc = parseJsonObject(stdout ?? "");
+  const version = parseVersion(doc?.version);
+  if (!version) return null;
+  const u = doc.update;
+  const latest = u?.checked && u?.available ? parseVersion(u.latest) : null;
+  return { version, update: latest ? { current: version, latest } : null };
+}

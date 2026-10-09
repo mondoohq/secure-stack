@@ -61,7 +61,7 @@ import {
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
   npxNodeModulesDir, nativeXgrepCandidates,
-  XGREP_INSTALL_URL, parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv,
+  XGREP_INSTALL_URL, parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv, parseVersionJSON,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -516,10 +516,19 @@ async function runXgrepUpdate($, e) {
 // probe runs `xgrep version` and returns whether it ran and the semver it
 // reported (e.g. "xgrep 0.80.0 (commit: …)" -> "0.80.0").
 async function probe($, cmd) {
+  // Structured first: `version --json --check-update` (xgrep#3238) reports the
+  // version and any newer release as data. An older xgrep rejects the flag, so
+  // fall back to the text form, whose update notice rides along on stderr.
+  try {
+    const j = await $.process.run([...cmd, "version", "--json", "--check-update"], { timeoutMs: 120000 });
+    const doc = j.exitCode === 0 ? parseVersionJSON(j.stdout) : null;
+    if (doc) return { ok: true, version: doc.version, update: doc.update };
+  } catch {
+    // fall through to the text form
+  }
   try {
     const r = await $.process.run([...cmd, "version"], { timeoutMs: 120000 });
     if (r.exitCode !== 0) return { ok: false };
-    // xgrep's own update notice (stderr) rides along — see parseUpdateNotice.
     return { ok: true, version: parseVersion(r.stdout), update: parseUpdateNotice(r.stderr) };
   } catch {
     return { ok: false };

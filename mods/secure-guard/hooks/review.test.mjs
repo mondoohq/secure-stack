@@ -31,7 +31,7 @@ import {
   combineAdvisories,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
-  parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv,
+  parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv, parseVersionJSON,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -438,4 +438,18 @@ test("npmGlobalPrefix finds the npm prefix of a global install, and nothing else
 test("xgrepUpdateArgv updates the install in place, or installs a global copy", () => {
   assert.deepEqual(xgrepUpdateArgv("/opt/homebrew"), ["npm", "--prefix", "/opt/homebrew", "install", "-g", "@mondoohq/xgrep@latest"]);
   assert.deepEqual(xgrepUpdateArgv(null), ["npm", "install", "-g", "@mondoohq/xgrep@latest"]);
+});
+
+test("parseVersionJSON reads version and update from xgrep version --json --check-update", () => {
+  assert.deepEqual(
+    parseVersionJSON(JSON.stringify({ version: "0.81.0", update: { checked: true, latest: "0.83.0", available: true } })),
+    { version: "0.81.0", update: { current: "0.81.0", latest: "0.83.0" } });
+  assert.deepEqual(parseVersionJSON(JSON.stringify({ version: "0.83.0", update: { checked: true, latest: "0.83.0", available: false } })),
+    { version: "0.83.0", update: null });
+  // not checked (opted out / lookup failed) is "unknown", not an update
+  assert.deepEqual(parseVersionJSON(JSON.stringify({ version: "0.81.0", update: { checked: false, available: false } })),
+    { version: "0.81.0", update: null });
+  // an older xgrep printed text or an error: not the document
+  assert.equal(parseVersionJSON("xgrep 0.80.0 (commit: x)"), null);
+  assert.equal(parseVersionJSON('Error: unknown flag: --check-update'), null);
 });

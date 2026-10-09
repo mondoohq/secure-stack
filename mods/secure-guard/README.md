@@ -148,6 +148,8 @@ New xgrep releases add and sharpen the rules the guard runs, so an outdated xgre
 catches less. xgrep already checks for newer releases itself when it reports its version,
 which the guard does to probe it. The guard reads that answer, so it makes no network call of
 its own, and xgrep's opt-outs (`XGREP_UPDATE_CHECK=0`, `DO_NOT_TRACK=1`) turn the notice off.
+With an xgrep that supports `version --json --check-update`, the guard reads the answer as
+structured data; with an older one, it reads xgrep's update notice instead.
 
 When a newer xgrep is out, the transcript says so, at most once a day per version:
 
