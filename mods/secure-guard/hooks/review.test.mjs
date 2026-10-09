@@ -31,6 +31,7 @@ import {
   combineAdvisories,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
+  parseUpdateNotice, npmGlobalPrefix, xgrepUpdateArgv,
 } from "./core.mjs";
 
 test("cnspecScanArgs builds argv with one -f per bundle; docker uses `file`; incognito", () => {
@@ -416,4 +417,25 @@ test("findingsToast shares findingsNotice's lead (one wording, two lengths)", ()
   assert.equal(findingsToast("cnspec", "main.tf", []), null);
   assert.equal(findingsNotice("cnspec", "main.tf", []), null);
   assert.equal(findingsNotice("xgrep", "a.py", undefined), null);
+});
+
+test("parseUpdateNotice reads xgrep's own notice, styled or plain", () => {
+  assert.deepEqual(parseUpdateNotice("\x1b[33m⚠ A new xgrep release is available: v0.80.0 → v0.83.0\x1b[0m\n  Update with …"), { current: "0.80.0", latest: "0.83.0" });
+  assert.deepEqual(parseUpdateNotice("A new xgrep release is available: 0.81.0 -> 0.83.0"), { current: "0.81.0", latest: "0.83.0" });
+  assert.equal(parseUpdateNotice("xgrep 0.83.0 (commit: abc)"), null);
+  assert.equal(parseUpdateNotice(undefined), null);
+});
+
+test("npmGlobalPrefix finds the npm prefix of a global install, and nothing else", () => {
+  assert.equal(npmGlobalPrefix("/Users/u/.nvm/versions/node/v22/lib/node_modules/@mondoohq/xgrep/bin/xgrep.js"), "/Users/u/.nvm/versions/node/v22");
+  assert.equal(npmGlobalPrefix("/opt/homebrew/lib/node_modules/@mondoohq/xgrep/index.js"), "/opt/homebrew");
+  assert.equal(npmGlobalPrefix("C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@mondoohq\\xgrep\\bin\\xgrep.js"), "C:\\Users\\u\\AppData\\Roaming\\npm");
+  assert.equal(npmGlobalPrefix("/home/u/.npm/_npx/abc/node_modules/@mondoohq/xgrep_linux_amd64/xgrep"), null); // npx cache
+  assert.equal(npmGlobalPrefix("/Users/u/go/bin/xgrep"), null); // dev build
+  assert.equal(npmGlobalPrefix(undefined), null);
+});
+
+test("xgrepUpdateArgv updates the install in place, or installs a global copy", () => {
+  assert.deepEqual(xgrepUpdateArgv("/opt/homebrew"), ["npm", "--prefix", "/opt/homebrew", "install", "-g", "@mondoohq/xgrep@latest"]);
+  assert.deepEqual(xgrepUpdateArgv(null), ["npm", "install", "-g", "@mondoohq/xgrep@latest"]);
 });
