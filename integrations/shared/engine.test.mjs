@@ -277,11 +277,38 @@ test("runner: after the npx fetch, scans run the native binary and its path is c
   assert.equal(later.calls.find((c) => c.includes("scan"))[0], NATIVE_BIN);
 });
 
-test("runner: a cached native path that vanished falls back to npx, not to nothing", () => {
+test("runner: a cached native path that vanished is re-resolved, not replaced by npx-per-call", () => {
   const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
-  writeFileSync(cacheFile, JSON.stringify({ ok: true, bin: NATIVE_BIN }));
-  const gone = npxWorld({ nativePresent: false });
-  const r = makeRealRunner({}, { ...gone.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
+  writeFileSync(cacheFile, JSON.stringify({ ok: true, bin: "/gone/node_modules/@mondoohq/xgrep_linux_amd64/xgrep" }));
+  const world = npxWorld(); // npx re-fetches; the native binary is where npm put it now
+  const r = makeRealRunner({}, { ...world.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
   assert.equal(r.available, true);
-  assert.equal(gone.calls.find((c) => c.includes("scan"))[0], "npx");
+  assert.equal(world.calls.find((c) => c.includes("scan"))[0], NATIVE_BIN, "scans run the re-resolved native binary");
+  assert.equal(JSON.parse(readFileSync(cacheFile, "utf8")).bin, NATIVE_BIN, "and the cache points at it");
+});
+
+test("runner: when no native binary can be found, npx still works (fail-safe)", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  const none = npxWorld({ nativePresent: false });
+  const r = makeRealRunner({}, { ...none.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
+  assert.equal(r.available, true);
+  assert.equal(none.calls.find((c) => c.includes("scan"))[0], "npx");
+});
+
+test("runner: a cache from before native resolution gets one re-resolve, then remembers the answer", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  writeFileSync(cacheFile, JSON.stringify({ ok: true })); // written by the previous release
+  const world = npxWorld();
+  makeRealRunner({}, { ...world.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
+  assert.equal(world.calls.find((c) => c.includes("scan"))[0], NATIVE_BIN);
+  assert.equal(JSON.parse(readFileSync(cacheFile, "utf8")).bin, NATIVE_BIN);
+
+  // Where no native binary exists, that is remembered too: no re-resolve per process.
+  const cacheFile2 = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  writeFileSync(cacheFile2, JSON.stringify({ ok: true }));
+  makeRealRunner({}, { ...npxWorld({ nativePresent: false }).deps, cacheFile: cacheFile2 })("xgrep", ["scan"], 1000);
+  assert.equal(JSON.parse(readFileSync(cacheFile2, "utf8")).noNative, true);
+  const again = npxWorld({ nativePresent: false });
+  makeRealRunner({}, { ...again.deps, cacheFile: cacheFile2 })("xgrep", ["scan"], 1000);
+  assert.ok(!again.calls.some((c) => c.includes("which")), "no re-resolve once 'no native' is known");
 });

@@ -99,12 +99,17 @@ export function makeRealRunner(env = process.env, deps = {}) {
     // fetched, the native binary inside the npx package is called directly —
     // npx re-resolves the package on every call, seconds on a busy machine.
     const cached = readNpxCache(cacheFile);
-    if (cached?.ok) {
-      xgrep = cached.bin && exists(cached.bin) ? [cached.bin] : XGREP_NPX;
+    if (cached?.ok && cached.bin && exists(cached.bin)) {
+      xgrep = [cached.bin];
       return xgrep;
     }
+    if (cached?.ok && cached.noNative) { xgrep = XGREP_NPX; return xgrep; } // looked before: npx only
+    // Otherwise — a cached native path that vanished (npm's npx cache was
+    // cleaned), or a cache from before native resolution existed — fetch and
+    // resolve again below rather than settle for npx on every call, which is
+    // the slowness this cache exists to avoid.
     if (cached?.failedAt && clock.now() - cached.failedAt < NPX_RETRY_MS) return xgrep; // backing off
-    notify(`secure-guard: no xgrep with 'guard --command' installed; fetching ${XGREP_NPM}@${XGREP_PIN} ` +
+    if (!cached?.ok) notify(`secure-guard: no xgrep with 'guard --command' installed; fetching ${XGREP_NPM}@${XGREP_PIN} ` +
       `from npm via npx (the scanner, not your data). Install it to skip this: npm i -g ${XGREP_NPM}`);
     const ok = hasCommandFlag(XGREP_NPX);
     let bin = null;
@@ -112,7 +117,7 @@ export function makeRealRunner(env = process.env, deps = {}) {
       bin = resolveNativeXgrep();
       xgrep = bin ? [bin] : XGREP_NPX;
     }
-    writeNpxCache(cacheFile, ok ? { ok: true, ...(bin ? { bin } : {}) } : { failedAt: clock.now() });
+    writeNpxCache(cacheFile, ok ? { ok: true, ...(bin ? { bin } : { noNative: true }) } : { failedAt: clock.now() });
     return xgrep;
   };
   // resolveNativeXgrep finds the platform binary inside the pinned npx package
