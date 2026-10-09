@@ -60,6 +60,7 @@ import {
   parseJsonObject, IAC_TIMEOUT_MS,
   FP_REPO, FP_LABEL, validateFpReport, fpReproArgs, fpReproduces, fpIssue, fpIssueUrl,
   findingsNotice, findingsToast,
+  npxNodeModulesDir, nativeXgrepCandidates,
 } from "./core.mjs";
 
 // The tool the agent calls to report an xgrep false positive (listed to the
@@ -96,6 +97,11 @@ const REVIEW_TIMEOUT_MS = 10000;
 let backend = null;
 // The call currently held for review, or null. One at a time.
 let held = null;
+// Where this session already said a recurring failure out loud (see warnOnce).
+const warned = new Set();
+// $.store key for the native xgrep behind the pinned npx package (see
+// resolveNativeXgrep); keyed by the pin so a new pin resolves afresh.
+const NATIVE_XGREP_KEY = `native-xgrep-${XGREP_PIN}`;
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -175,7 +181,7 @@ export function register(on) {
     try {
       return await guardBashCall($, e, next);
     } catch (err) {
-      $.ui.log(`xgrep guard: unexpected error (${err?.message ?? err}); allowing`);
+      warnOnce($, "bash-error", `xgrep guard: unexpected error (${err?.message ?? err}); allowing`);
       return next(e);
     }
   });
@@ -196,7 +202,7 @@ export function register(on) {
       if (kind) return await reviewIac($, e, r, kind);
       return await reviewEdit($, e, r);
     } catch (err) {
-      $.ui.log(`secure-guard: inline review error (${err?.message ?? err}); not reporting`);
+      warnOnce($, "review-error", `secure-guard: inline review error (${err?.message ?? err}); not reporting`);
       return r;
     }
   });
@@ -230,7 +236,7 @@ async function guardBashCall($, e, next) {
     try {
       verdict = await evaluate($, b, command);
     } catch (err) {
-      $.ui.log(`xgrep guard: evaluate failed (${err?.message ?? err}); allowing`);
+      warnOnce($, "evaluate-failed", `xgrep guard: evaluate failed (${err?.message ?? err}); allowing`);
       return next(e); // fail open on an evaluate error
     }
     if (!verdict || verdict.decision === "allow") {
@@ -325,9 +331,21 @@ async function ensureBackend($) {
     outdated = p.version ?? "an older build";
   }
 
-  // Nothing local qualifies. Fetch the pinned release via npx — this installs
-  // xgrep when it is missing and updates past a too-old install, the way
-  // VS Code / IntelliJ pull their own managed copy rather than touch yours.
+  // Nothing local qualifies. A native binary resolved from the pinned npx
+  // package in an earlier session needs no fetch and no npx round trip.
+  const cached = await $.store.get(NATIVE_XGREP_KEY).catch(() => undefined);
+  if (typeof cached === "string" && cached) {
+    const c = await probe($, [cached]);
+    if (c.ok && meetsMin(c.version)) {
+      backend = await connectOrInproc($, [cached]);
+      return backend;
+    }
+    await $.store.delete(NATIVE_XGREP_KEY).catch(() => {});
+  }
+
+  // Fetch the pinned release via npx — this installs xgrep when it is missing
+  // and updates past a too-old install, the way VS Code / IntelliJ pull their
+  // own managed copy rather than touch yours.
   if (outdated) {
     $.ui.toast(`xgrep guard: xgrep ${outdated} is older than ${XGREP_MIN}; updating to ${XGREP_PIN}`);
     $.ui.log(`xgrep guard: your xgrep (${outdated}) predates the guard's minimum (${XGREP_MIN}), so the shell check can't run on it. Fetching ${XGREP_NPM}@${XGREP_PIN} via npx for this session. To update your own install: npm i -g ${XGREP_NPM}@latest. See ${DOCS_URL}`);
@@ -338,11 +356,55 @@ async function ensureBackend($) {
   const npx = ["npx", "-y", `${XGREP_NPM}@${XGREP_PIN}`];
   const p = await probe($, npx);
   if (p.ok && meetsMin(p.version)) {
-    backend = await connectOrInproc($, npx);
+    // Call the native binary npx just fetched, not npx: npx re-resolves the
+    // package on every call (seconds on a busy machine — long enough to time
+    // the guard out and let commands through unchecked).
+    const native = await resolveNativeXgrep($);
+    if (native) await $.store.set(NATIVE_XGREP_KEY, native).catch(() => {});
+    backend = await connectOrInproc($, native ? [native] : npx);
     return backend;
   }
   backend = { mode: "unavailable", reason: `no xgrep >= ${XGREP_MIN} found or fetchable (${XGREP_NPM}). Install it: ${NPM_URL}` };
   return backend;
+}
+
+// resolveNativeXgrep finds the platform binary inside the pinned npx package:
+// npx puts the package's bin shim on PATH, the shim's node_modules holds
+// @mondoohq/xgrep_<os>_<arch>/ (npm installs only this platform's), and the
+// binary there is what the shim would exec. null when it can't be found or
+// doesn't run — the caller keeps using npx.
+async function resolveNativeXgrep($) {
+  for (const finder of [["which", "xgrep"], ["where", "xgrep"]]) {
+    let r;
+    try {
+      r = await $.process.run(["npx", "-y", "-p", `${XGREP_NPM}@${XGREP_PIN}`, ...finder], { timeoutMs: 120000 });
+    } catch {
+      continue;
+    }
+    if (r.exitCode !== 0) continue;
+    const shim = String(r.stdout ?? "").split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+    const nodeModules = npxNodeModulesDir(shim);
+    if (!nodeModules) continue;
+    const scope = `${nodeModules}/@mondoohq`;
+    const entries = await $.fs.list(scope).catch(() => []);
+    for (const rel of nativeXgrepCandidates(entries.map((e) => e.name))) {
+      const bin = `${scope}/${rel}`;
+      if (!(await $.fs.exists(bin).catch(() => false))) continue;
+      const v = await probe($, [bin]);
+      if (v.ok && meetsMin(v.version)) return bin;
+    }
+  }
+  return null;
+}
+
+// warnOnce logs a recurring failure the first time it happens in a session,
+// with a toast saying what it means — a guard that fails open on every call
+// should say so once, clearly, not scroll the same line past on each command.
+function warnOnce($, key, line) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  $.ui.log(`${line} (further occurrences this session are not logged)`);
+  $.ui.toast("secure-guard: a scan failed and the action went through unchecked — see the transcript");
 }
 
 // probe runs `xgrep version` and returns whether it ran and the semver it

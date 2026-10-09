@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluate, makeRealRunner, shellReason, XGREP_NPX, XGREP_NPX_CACHE } from "./engine.mjs";
@@ -237,4 +237,51 @@ test("runner: a failed npx fetch is remembered for a while, then retried", () =>
 test("XGREP_NPX_CACHE lives in a per-user cache dir, not the shared temp dir", () => {
   assert.ok(!XGREP_NPX_CACHE.startsWith(tmpdir()), XGREP_NPX_CACHE);
   assert.match(XGREP_NPX_CACHE, /secure-guard/);
+});
+
+// A world where the local xgrep is too old and the pinned npx package holds a
+// native binary at NATIVE. Every process goes through `calls`.
+const NPX_NM = "/home/u/.npm/_npx/abc/node_modules";
+const NATIVE_BIN = join(NPX_NM, "@mondoohq", "xgrep_linux_amd64", "xgrep");
+function npxWorld({ nativePresent = true } = {}) {
+  const calls = [];
+  const spawnSync = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    const verdict = { status: 0, stdout: JSON.stringify({ decision: "allow", findings: [] }) };
+    if (cmd === "npx" && args.includes("which")) return { status: 0, stdout: `${NPX_NM}/.bin/xgrep\n` };
+    if (cmd === "npx" && args.includes("where")) return { status: 1, stdout: "" };
+    if (cmd === "npx" || (cmd === NATIVE_BIN && nativePresent)) return verdict;
+    return { status: 1, stdout: "error: unknown flag: --command" }; // the old local xgrep
+  };
+  const deps = {
+    spawnSync,
+    notify: () => {},
+    existsSync: (p) => nativePresent && p === NATIVE_BIN,
+    readdir: (d) => (d === join(NPX_NM, "@mondoohq") ? ["xgrep", "xgrep_linux_amd64"] : []),
+  };
+  return { calls, deps };
+}
+
+test("runner: after the npx fetch, scans run the native binary and its path is cached", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  const first = npxWorld();
+  makeRealRunner({}, { ...first.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
+  const scan = first.calls.find((c) => c.includes("scan"));
+  assert.equal(scan[0], NATIVE_BIN, "the scan should run the native binary, not npx");
+  assert.equal(JSON.parse(readFileSync(cacheFile, "utf8")).bin, NATIVE_BIN);
+
+  // A later hook process: the cache answers; no npx at all.
+  const later = npxWorld();
+  makeRealRunner({}, { ...later.deps, cacheFile })("xgrep", ["scan", "g", "--json"], 1000);
+  assert.ok(later.calls.every((c) => c[0] !== "npx"), "no npx once the native path is cached");
+  assert.equal(later.calls.find((c) => c.includes("scan"))[0], NATIVE_BIN);
+});
+
+test("runner: a cached native path that vanished falls back to npx, not to nothing", () => {
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "sg-")), "c");
+  writeFileSync(cacheFile, JSON.stringify({ ok: true, bin: NATIVE_BIN }));
+  const gone = npxWorld({ nativePresent: false });
+  const r = makeRealRunner({}, { ...gone.deps, cacheFile })("xgrep", ["scan", "f", "--json"], 1000);
+  assert.equal(r.available, true);
+  assert.equal(gone.calls.find((c) => c.includes("scan"))[0], "npx");
 });
