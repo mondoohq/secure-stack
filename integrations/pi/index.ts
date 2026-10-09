@@ -10,7 +10,7 @@
 //   Bash  → `xgrep guard --command` (secrets/PII + dangerous command)
 //   Write → `xgrep scan` code / `cnspec scan` IaC (OWASP Top 10 / policy)
 //
-// Pre-tool, fail-open. Requires node + xgrep (≥ 0.78, PATH or XGREP_PATH); cnspec
+// Pre-tool, fail-open. Requires node + xgrep (≥ 0.84, PATH or XGREP_PATH); cnspec
 // optional for the IaC leg.
 //
 // NOTE: Pi is fast-moving — confirm the hook name (`tool_call`), the call fields,

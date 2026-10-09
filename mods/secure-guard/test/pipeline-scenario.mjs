@@ -38,7 +38,7 @@ const PIN = XGREP_PIN; // single source of truth in core.mjs
 
 // ─── Resolve a CAPABLE xgrep ─────────────────────────────────────────────────
 // Like the mod (XGREP_PATH → `xgrep` → npx@pin), but the scenario demonstrates
-// the shell guard too, which needs `guard --command` (xgrep >= 0.78). A binary
+// the shell guard too, which needs `guard --command` (xgrep >= 0.84). A binary
 // on PATH that is too old lacks that flag — the mod fails open there, by design;
 // to SHOW the guard working we require a capable binary and fall through to the
 // pinned release if the local one is too old.

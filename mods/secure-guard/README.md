@@ -6,8 +6,11 @@ scanners in the loop as an AI agent works — routing each tool call to the righ
 ![secure-guard holding a piped installer in Claude Code until the user decides](demo.gif)
 
 - **Shell guard (xgrep)** — holds a risky Bash command behind a Proceed / Cancel pane until
-  you answer. xgrep here **prevents secrets and PII from leaving** via a prompt or tool call,
-  and blocks dangerous commands.
+  you answer. xgrep here **keeps secrets and PII from leaving**: a token or an SSN in the
+  command, credential files, a secret sent by variable name, or the whole environment piped
+  to a remote host. It also holds remote code piped into a shell, reverse shells, and
+  destructive commands (`rm -rf` of home or root, a force-push to `main`, `DROP DATABASE`,
+  `chmod -R 777 /`). Each of these is a [category](#tuning-the-guard) you can tune.
 - **Inline code review (xgrep)** — after the agent writes or edits code, scans it and hands
   high-confidence findings back right after the tool result so the agent fixes them in the
   same turn. xgrep here **enforces the OWASP Top 10** (SAST taint) plus SCA and secrets on the
@@ -95,7 +98,7 @@ policy download in the session the first time each happens:
 
 | What | When | Direction |
 |------|------|-----------|
-| the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.78 is installed | down: the scanner, not your data |
+| the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.84 is installed | down: the scanner, not your data |
 | a version check against [install.mondoo.com](https://install.mondoo.com) | xgrep's own, when the guard runs `xgrep version` to probe it; cached for 24 h; off with `XGREP_UPDATE_CHECK=0` or `DO_NOT_TRACK=1` | down: the latest version number |
 | a newer xgrep, from the npm package | only when you run `/secure-guard update` | down: the scanner |
 | cnspec policy bundles, from [github.com/mondoohq/cnspec](https://github.com/mondoohq/cnspec/tree/main/content) | on an IaC scan, unless `CNSPEC_CONTENT_DIR` points at a local copy | down: policies only |
@@ -141,6 +144,27 @@ the complete picture. Install mods only from sources you trust.
 
 Run `/secure-guard` to see how it's reaching each engine (xgrep: daemon / in-process /
 fetched; cnspec: available / not installed), and whether a newer xgrep is available.
+
+## Tuning the guard
+
+Every shell-guard rule belongs to a category: `secrets`, `pii`, `remote-code`,
+`remote-access`, `exfiltration`, `destructive`, `code-execution`, `obfuscation`. Each one
+blocks by default (the guard holds the command for you). To change that, set a category's mode
+to `block`, `ask`, `warn` or `off` in a `guard.yaml`. xgrep reads it, so it applies to the
+guard without any setting in the mod:
+
+```yaml
+# <user config dir>/xgrep/guard.yaml  — e.g. ~/.config/xgrep/guard.yaml, or
+# ~/Library/Application Support/xgrep/guard.yaml on macOS
+categories:
+  pii: off          # we redact PII elsewhere
+  destructive: ask
+```
+
+A repository's own `.xgrep/guard.yaml` can only make a category **stricter**: a repo you clone
+can't switch your guard off. Run `xgrep guard categories` to see each category's mode and where
+it came from; the [xgrep guard docs](https://mondoo.com/docs/xgrep/ai-agents/guard-hooks)
+have the details.
 
 ## Keeping xgrep current
 
