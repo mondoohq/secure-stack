@@ -96,6 +96,8 @@ policy download in the session the first time each happens:
 | What | When | Direction |
 |------|------|-----------|
 | the xgrep binary, from the public [`@mondoohq/xgrep`](https://www.npmjs.com/package/@mondoohq/xgrep) npm package | only if no xgrep ≥ 0.78 is installed | down: the scanner, not your data |
+| a version check against [install.mondoo.com](https://install.mondoo.com) | xgrep's own, when the guard runs `xgrep version` to probe it; cached for 24 h; off with `XGREP_UPDATE_CHECK=0` or `DO_NOT_TRACK=1` | down: the latest version number |
+| a newer xgrep, from the npm package | only when you run `/secure-guard update` | down: the scanner |
 | cnspec policy bundles, from [github.com/mondoohq/cnspec](https://github.com/mondoohq/cnspec/tree/main/content) | on an IaC scan, unless `CNSPEC_CONTENT_DIR` points at a local copy | down: policies only |
 | cnspec providers (e.g. its Terraform provider) | on an IaC scan, when cnspec's own `--auto-update` (on by default) finds one missing or outdated | down: cnspec's plugins |
 | scan results to your Mondoo Platform space | only with `CNSPEC_USE_PLATFORM=1` | up, by your choice |
@@ -138,7 +140,34 @@ the complete picture. Install mods only from sources you trust.
 ## Status in a session
 
 Run `/secure-guard` to see how it's reaching each engine (xgrep: daemon / in-process /
-fetched; cnspec: available / not installed).
+fetched; cnspec: available / not installed), and whether a newer xgrep is available.
+
+## Keeping xgrep current
+
+New xgrep releases add and sharpen the rules the guard runs, so an outdated xgrep quietly
+catches less. xgrep already checks for newer releases itself when it reports its version,
+which the guard does to probe it. The guard reads that answer, so it makes no network call of
+its own, and xgrep's opt-outs (`XGREP_UPDATE_CHECK=0`, `DO_NOT_TRACK=1`) turn the notice off.
+
+When a newer xgrep is out, the transcript says so, at most once a day per version:
+
+```
+secure-guard: xgrep 0.83.0 is available (you have 0.81.0 at /opt/homebrew/bin/xgrep).
+Run /secure-guard update to install it — it runs: npm --prefix /opt/homebrew install -g @mondoohq/xgrep@latest
+```
+
+Run **`/secure-guard update`** to install it. The guard then switches to the new binary right
+away. What the update does depends on how xgrep is installed:
+
+- **An npm global install** (including one under Homebrew's Node) is updated in place, with
+  the npm prefix it lives under, so it updates the copy the guard actually runs.
+- **No local install** (the guard was using the npm package it fetched): a global copy is
+  installed, and the guard prefers it from then on.
+- **Anything else** (a release download, a development build) is left alone, and you get the
+  link to [install.mondoo.com](https://install.mondoo.com) to update it the way you installed it.
+
+The update only runs when you type `/secure-guard update` yourself. It never runs for the
+model, the SDK or another plugin, because it changes software on your machine.
 
 ## Testing
 

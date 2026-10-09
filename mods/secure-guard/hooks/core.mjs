@@ -534,3 +534,40 @@ export function nativeXgrepCandidates(entryNames) {
     .sort()
     .flatMap((n) => [`${n}/xgrep`, `${n}/xgrep.exe`]);
 }
+
+// ─── Keeping the user's xgrep current ────────────────────────────────────────
+//
+// xgrep checks for newer releases itself (Mondoo's install service, cached 24h,
+// skipped for dev builds and with XGREP_UPDATE_CHECK=0 / DO_NOT_TRACK=1) and
+// prints the result to stderr on `xgrep version` — which the guard already
+// runs to probe the binary. So the guard reads the answer from that probe: no
+// extra process, no network call of its own, and xgrep's opt-outs apply.
+
+export const XGREP_INSTALL_URL = "https://install.mondoo.com";
+
+// parseUpdateNotice reads xgrep's "A new xgrep release is available: v0.81.0 →
+// v0.83.0" line (ANSI styling stripped); null when there is none.
+export function parseUpdateNotice(stderr) {
+  const text = String(stderr ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  const m = /new xgrep release is available:\s*v?(\d+\.\d+\.\d+)\s*(?:→|->)\s*v?(\d+\.\d+\.\d+)/i.exec(text);
+  return m ? { current: m[1], latest: m[2] } : null;
+}
+
+// npmGlobalPrefix: the npm prefix an xgrep was installed under, from the real
+// path of its launcher (<prefix>/lib/node_modules/@mondoohq/xgrep/… on Unix,
+// <prefix>\node_modules\@mondoohq\xgrep\… on Windows); null when it isn't an
+// npm global install (a release download, a dev build, an npx cache).
+export function npmGlobalPrefix(realPath) {
+  const p = String(realPath ?? "");
+  if (/[\\/]_npx[\\/]/.test(p)) return null; // npx's cache, not a global install
+  const m = /^(.*?)[\\/](?:lib[\\/])?node_modules[\\/]@mondoohq[\\/]xgrep(?:_[a-z0-9]+_[a-z0-9]+)?[\\/]/.exec(p);
+  return m && m[1] ? m[1] : null;
+}
+
+// xgrepUpdateArgv: the command that updates xgrep. With a prefix it updates
+// exactly the install the guard runs; without one it installs a global copy.
+export function xgrepUpdateArgv(prefix) {
+  return prefix
+    ? ["npm", "--prefix", prefix, "install", "-g", `${XGREP_NPM}@latest`]
+    : ["npm", "install", "-g", `${XGREP_NPM}@latest`];
+}

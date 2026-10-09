@@ -386,3 +386,85 @@ test("a scan that keeps failing is reported once per session, not on every call"
   expect(failures.length).toBe(1);
   expect(failures[0]).toContain("further occurrences this session are not logged");
 });
+
+// ─── Keeping the user's xgrep current ────────────────────────────────────────
+
+const LOCAL_BIN = "/opt/homebrew/bin/xgrep";
+const LOCAL_REAL = "/opt/homebrew/lib/node_modules/@mondoohq/xgrep/index.js";
+const NOTICE = "\u001b[33m⚠ A new xgrep release is available: v0.81.0 → v0.83.0\u001b[0m\n";
+
+// fakeUpdateWorld: `xgrep` on PATH is 0.81.0, installed by npm under `real`'s
+// prefix, and xgrep's own check says 0.83.0 is out. `npm` updates it.
+function fakeUpdateWorld(on: any, opts: { real?: string; store?: Map<string, unknown> } = {}) {
+  const runs: string[][] = [];
+  const logs: string[] = [];
+  const store = opts.store ?? new Map<string, unknown>();
+  let installed = "0.81.0";
+  const ok = (stdout: string, stderr = "") => ({ value: { exitCode: 0, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } });
+  on("env.get", () => ({ value: undefined }));
+  on("ui.toast", () => ({ value: undefined }));
+  on("ui.log", ($: any, e: any) => { logs.push(String(e.text ?? "")); return { value: undefined }; });
+  on("clock.now", () => ({ value: Date.now() }));
+  on("store.get", ($: any, e: any) => ({ value: store.get(e.key) }));
+  on("store.set", ($: any, e: any) => { store.set(e.key, e.value); return { value: undefined }; });
+  on("store.delete", ($: any, e: any) => { store.delete(e.key); return { value: undefined }; });
+  on("fs.stat", ($: any, e: any) => ({ value: { kind: "file", size: 1, mtimeMs: 0, isLink: true, realPath: e.path === LOCAL_BIN ? (opts.real ?? LOCAL_REAL) : e.path } }));
+  on("process.run", ($: any, e: any) => {
+    const argv = [...e.argv];
+    runs.push(argv);
+    if (argv[0] === "which" && argv[1] === "xgrep") return ok(`${LOCAL_BIN}\n`);
+    if (argv[0] === "xgrep" && argv[1] === "version") return ok(`xgrep ${installed}`, installed === "0.83.0" ? "" : NOTICE);
+    if (argv[0] === "npm") { installed = "0.83.0"; return ok("added 2 packages"); }
+    if (argv[0] === "xgrep") return ok("{\"decision\":\"allow\",\"findings\":[]}");
+    return { deny: `spawn ${argv[0]} ENOENT` };
+  });
+  on("tool.call", { tool: "Bash" }, () => ({ result: { stdout: "", stderr: "", interrupted: false } }));
+  return { runs, logs, store };
+}
+
+// The notice is raised in the background after the backend resolves.
+async function until(cond: () => boolean) {
+  for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 10));
+}
+
+test("an outdated npm-installed xgrep: the user is told, with the exact update command", async ($, on) => {
+  const { logs } = fakeUpdateWorld(on);
+  await $.tool.call({ tool: "Bash", command: "ls" } as any);
+  await until(() => logs.some((l) => l.includes("is available")));
+  const notice = logs.find((l) => l.includes("is available")) ?? "";
+  expect(notice).toContain("xgrep 0.83.0 is available (you have 0.81.0 at /opt/homebrew/bin/xgrep)");
+  expect(notice).toContain("/secure-guard update");
+  expect(notice).toContain("npm --prefix /opt/homebrew install -g @mondoohq/xgrep@latest");
+});
+
+test("/secure-guard update, typed by the user, updates that install and switches to it", async ($, on) => {
+  const { runs } = fakeUpdateWorld(on);
+  const r: any = await $.command.run({ command: "secure-guard", args: "update", origin: { kind: "composer" } } as any);
+  expect(String(r.text)).toContain("updated xgrep to 0.83.0");
+  expect(runs.find((a) => a[0] === "npm")).toEqual(["npm", "--prefix", "/opt/homebrew", "install", "-g", "@mondoohq/xgrep@latest"]);
+});
+
+test("/secure-guard update does nothing unless the user typed it", async ($, on) => {
+  const { runs } = fakeUpdateWorld(on);
+  const r: any = await $.command.run({ command: "secure-guard", args: "update", origin: { kind: "plugin", name: "other" } } as any);
+  expect(String(r.text)).toContain("only runs when you type it yourself");
+  expect(runs.some((a) => a[0] === "npm")).toBe(false);
+});
+
+test("an xgrep that isn't an npm install is never changed — the user gets the install link", async ($, on) => {
+  const { runs, logs } = fakeUpdateWorld(on, { real: "/Users/u/go/bin/xgrep" });
+  const r: any = await $.command.run({ command: "secure-guard", args: "update", origin: { kind: "composer" } } as any);
+  expect(String(r.text)).toContain("isn't an npm install");
+  expect(String(r.text)).toContain("https://install.mondoo.com");
+  expect(runs.some((a) => a[0] === "npm")).toBe(false);
+  await until(() => logs.some((l) => l.includes("is available")));
+  expect(logs.find((l) => l.includes("is available")) ?? "").toContain("https://install.mondoo.com");
+});
+
+test("a version already announced today isn't announced again", async ($, on) => {
+  const store = new Map<string, unknown>([["xgrep-update-noticed-0.83.0", Date.now() - 60_000]]);
+  const { logs } = fakeUpdateWorld(on, { store });
+  await $.tool.call({ tool: "Bash", command: "ls" } as any);
+  await new Promise((r) => setTimeout(r, 200));
+  expect(logs.some((l) => l.includes("is available"))).toBe(false);
+});
