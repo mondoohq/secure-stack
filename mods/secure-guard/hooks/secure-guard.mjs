@@ -461,7 +461,9 @@ async function codeAdvisory($, file) {
 // visible reason. A transcript line (kept, right under the edit) says what
 // Mondoo caught; a toast draws the eye to it.
 function announceFindings($, engine, findings, file) {
-  $.ui.log(findingsNotice(engine, file, findings));
+  const line = findingsNotice(engine, file, findings);
+  if (line === null) return; // nothing handed over — nothing to show
+  $.ui.log(line);
   $.ui.toast(findingsToast(engine, file, findings));
 }
 

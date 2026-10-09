@@ -412,5 +412,8 @@ test("findingsToast shares findingsNotice's lead (one wording, two lengths)", ()
   const f = [{ rule: "r", title: "T", line: 1 }, { rule: "s", title: "U", line: 2 }];
   assert.equal(findingsToast("xgrep", "/w/app.py", f), "Mondoo xgrep found 2 issues in app.py — sent to Claude");
   assert.ok(findingsNotice("xgrep", "/w/app.py", f).startsWith("Mondoo xgrep found 2 issues in app.py: "));
-  assert.equal(findingsToast("cnspec", "main.tf", []), "Mondoo cnspec found 0 issues in main.tf — sent to Claude");
+  // nothing found → nothing to say (never "found 0 issues … sent to Claude")
+  assert.equal(findingsToast("cnspec", "main.tf", []), null);
+  assert.equal(findingsNotice("cnspec", "main.tf", []), null);
+  assert.equal(findingsNotice("xgrep", "a.py", undefined), null);
 });

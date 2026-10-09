@@ -482,6 +482,7 @@ const NOTICE_MAX_SHOWN = 3;
 // { rule, severity, message }).
 export function findingsNotice(engine, file, findings) {
   const list = Array.isArray(findings) ? findings : [];
+  if (list.length === 0) return null; // nothing was handed over — say nothing
   const name = (f) => engine === "cnspec"
     // A cnspec finding has no separate title: sarifFindings already cut its
     // `message` down to the check's title ("<title>: FAIL · …" → "<title>"),
@@ -494,10 +495,10 @@ export function findingsNotice(engine, file, findings) {
 }
 
 // findingsToast is the short cue for the same event; it shares findingsNotice's
-// lead so the two can't drift apart.
+// lead so the two can't drift apart. null when there is nothing to report.
 export function findingsToast(engine, file, findings) {
   const n = Array.isArray(findings) ? findings.length : 0;
-  return `${foundLead(engine, file, n)} — sent to Claude`;
+  return n === 0 ? null : `${foundLead(engine, file, n)} — sent to Claude`;
 }
 
 // foundLead: "Mondoo xgrep found 1 issue in app.py".
