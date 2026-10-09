@@ -1,6 +1,6 @@
 {
   "name": "secure-ai-services",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Secure AI services and AI tooling — scan OpenAI, Anthropic, vLLM, Databricks AI, and vector stores with cnspec, and govern approved AI agents/IDE-extensions/MCP servers, mapped to the OWASP LLM Top 10",
   "author": {
     "name": "Mondoo"

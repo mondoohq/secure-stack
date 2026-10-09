@@ -1,6 +1,6 @@
 {
   "name": "secure-os",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Audit and harden operating systems and network devices — scan a Linux/macOS/Windows host, container image, or network device against CIS/vendor benchmarks with cnspec",
   "author": {
     "name": "Mondoo"
