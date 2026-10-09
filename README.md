@@ -15,9 +15,10 @@ the agent fixes what it got wrong while it is still working on it.
 ### Stops risky commands before they run
 
 Every shell command the agent wants to run is checked first. A remote script piped into a
-shell, credential or SSH-key files about to be sent to a remote host, an `rm -rf` of your
-home directory: the command is **held** and you choose Proceed or Cancel (above). Everything
-else runs without a prompt.
+shell, an API token or a customer's SSN in the command, your credential files or environment
+about to be sent to a remote host, an `rm -rf` of your home directory, a force-push to `main`:
+the command is **held** and you choose Proceed or Cancel (above). Everything else runs without
+a prompt, and you can [tune what is held](mods/secure-guard/README.md#tuning-the-guard).
 
 ### Catches vulnerabilities as code is written — and gets them fixed
 
@@ -76,7 +77,7 @@ work as usual, or ask for something from the table above. Other agents:
 | **Code** | Injection (SQL, command, code), XSS, path traversal, SSRF, insecure deserialization, weak crypto — taint analysis in ~38 languages · hard-coded secrets (166 families) | as the agent writes it | xgrep |
 | **Dependencies** | Known-vulnerable packages (SCA, 12+ ecosystems) · SBOM / CBOM / AIBOM | on demand (`secure-pipeline`) | xgrep |
 | **Infrastructure as code** | Terraform, CloudFormation, Dockerfile, Kubernetes against 89 policy bundles | as the agent writes it | cnspec |
-| **Commands** | Pipe-to-shell installers, `rm -rf` of home or root, credential and key files sent to a remote host | before they run | xgrep |
+| **Commands** | Pipe-to-shell installers, reverse shells · secrets and PII in the command · credential files, env dumps and secret env vars sent to a remote host · `rm -rf` of home or root, force-push to protected branches, `DROP DATABASE`, `chmod -R 777` on system paths | before they run | xgrep |
 | **Systems you run** | Linux / macOS / Windows hosts, container images, network devices · AWS, Azure, GCP, Kubernetes · GitHub, GitLab, Okta, Google Workspace, Microsoft 365, Slack, Atlassian, Snowflake · OpenAI, Anthropic, vLLM, Databricks AI, vector stores, approved agents and MCP servers | on demand (skills) | cnspec |
 
 Measured against **OWASP Top 10:2025** — 8 of 10 categories covered strongly, A10 partially,
