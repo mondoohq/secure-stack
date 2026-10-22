@@ -13,6 +13,7 @@ so only genuine, exploitable issues move on to a fix.
 ## When to Use
 
 - Triaging scan findings from xgrep
+- Checking a finding downloaded from the Mondoo console (`.fex.json`) against the code
 - Investigating whether a finding is a true or false positive
 - Understanding dataflow paths from sources to sinks
 - Mapping attack surface via call chain analysis
@@ -51,6 +52,34 @@ Key fields per finding:
 - `context.function`, `context.callers`, `context.callees` — call graph location
 - `remediation.description` — how to fix it
 - `remediation.has_autofix` — whether autofix is available via `extra.fix`
+
+### Step 1 (alternative): Start from a Mondoo finding document
+
+If you were handed a finding downloaded from the Mondoo console (`<id>.fex.json`, from the
+finding's Evidence card), reproduce it instead of scanning everything:
+
+| What | Where in the document |
+|------|-----------------------|
+| Rule | `ref` (also `details.properties.rule_id`) |
+| Location | `details.properties.file`, `line`, `end_line`, `column`, `end_column` |
+| Code excerpt Mondoo stored at scan time | `evidences[].file.contents` |
+| Repository and commit scanned | `affects[].component.identifiers.url`, `affects[].component.properties.revision` |
+| xgrep build that produced it | `details.properties.xgrep_version` (when present) |
+
+```bash
+git -C <repo> checkout <revision>
+xgrep scan --json --rule-id <ref> --include '<file>' <repo> > findings.json
+```
+
+Before tracing dataflow, compare the stored excerpt with the source at that line:
+
+- **Excerpt doesn't match the source, or doesn't show what the rule title describes** (for
+  example an eval-injection finding whose excerpt has no eval): the reported location is wrong,
+  not your code. Classify it **false positive** and say so in the rationale. Include the
+  document when reporting it to Mondoo.
+- **The re-scan no longer reports it at that commit**: the xgrep that produced it differs from
+  yours (compare `xgrep_version` with `xgrep --version`). Note both versions in the rationale.
+- **It reproduces**: continue with Step 2 on `findings.json`.
 
 ### Step 2: Investigate Each Finding
 
