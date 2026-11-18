@@ -15,7 +15,7 @@ assisted loop for the rest, surface advisory guidance, and report what cleared.
 
 Commands use xgrep's **built-in rules** by default — no `-f` needed. If the findings
 came from a **custom** rule pack, add `-f <rules-path>` to every `scan` /
-`fix verify` / `fix apply` command below.
+`fix verify` / `fix apply` / `fix candidate` command below.
 
 1. **Resolve the input** — one artifact, the `findings.json`:
    - **Triaged** (findings carry `extra.triage`, written by `/triage-findings`) → fix
@@ -35,8 +35,9 @@ came from a **custom** rule pack, add `-f <rules-path>` to every `scan` /
    ```
 
 4. **Assisted — drive the loop per finding.** Read `extra.fix_info.contract`, author
-   byte-span edits, `xgrep fix verify`, iterate on `reason`, `xgrep fix apply`. Use
-   `--batch` NDJSON to author several at once. (The skill's `references/remediation-loop.md`
+   byte-span edits, `xgrep fix candidate verify`, iterate on `reason`,
+   `xgrep fix candidate apply`. Pipe several candidates or changesets, one per line,
+   to submit them at once. (The skill's `references/remediation-loop.md`
    has the full per-finding loop and rejection-reason playbook.)
 
 5. **Advisory — surface, don't auto-edit.** Emit `extra.fix_info.hint` as a hand-fix

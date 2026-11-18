@@ -70,6 +70,7 @@ A candidate is the inverse shape — byte-span replacements you author:
 
 ```jsonc
 {
+  "id": "f1",                      // echoed on the outcome, to match it up
   "path": "src/db.py",
   "rule_id": "py-sql-injection",   // the finding the edit must clear
   "edits": [
@@ -83,11 +84,15 @@ output-only and not needed on input.
 
 ## The verdict you get back
 
+`xgrep fix candidate verify|apply` prints one `FixOutcome` line per candidate:
+
 ```jsonc
 {
-  "accepted": true,
-  "applied": false,                // true only after `fix apply` (verify never writes)
-  "reason": "",                    // set when accepted is false (see remediation-loop.md)
+  "fingerprint": "f1",             // the candidate's id
+  "rule_id": "py-sql-injection",
+  "path": "src/db.py",
+  "status": "verified",            // "applied" after `fix candidate apply`; "rejected" if it failed
+  "reason": "",                    // set when rejected (see remediation-loop.md)
   "diff": "--- a/…\n+++ b/…\n…"     // unified-diff preview of the edit
 }
 ```

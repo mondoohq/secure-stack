@@ -1,6 +1,7 @@
-# Outcome schema, fingerprint join & NDJSON streaming
+# Outcome schema, fingerprint join & candidate streams
 
-`xgrep fix verify|apply` reports one `FixOutcome` per finding/candidate. The batch
+`xgrep fix verify|apply` (a scan's findings) and `xgrep fix candidate verify|apply`
+(edits you authored) report one `FixOutcome` per finding or candidate. The batch
 layer joins those outcomes back to the input findings by `fingerprint` and tallies
 them for the summary.
 
@@ -26,8 +27,8 @@ them for the summary.
 
 | status | meaning |
 |---|---|
-| `applied` | Edit verified and written atomically (`fix apply`). |
-| `verified` | Passed the harness but not written (`fix verify`). |
+| `applied` | Edit verified and written atomically (`fix apply`, `fix candidate apply`). |
+| `verified` | Passed the harness but not written (`fix verify`, `fix candidate verify`). |
 | `rejected` | Harness rejected the edit — see `reason`. |
 | `needs-agent` | An `assisted` finding with no edit authored yet — drive the loop. |
 | `advisory` | Advisory-only; no code edit. Surface the hint. |
@@ -46,9 +47,10 @@ them for the summary.
 | `read-error` | File read/write failed — check the path and permissions. |
 | `rescan-error` | The re-scan gate itself failed — usually transient; retry. |
 
-## FixReport (non-streaming)
+## FixReport (scan findings)
 
-Without `--batch`, `fix` emits one `FixReport`:
+`xgrep fix verify|apply` read a scan report (or the findings cache) and emit one
+`FixReport`:
 
 ```jsonc
 {
@@ -82,14 +84,14 @@ Cross-file changeset (all files verified and written as a unit, or none):
 `FixEdit` byte spans are absolute and zero-width spans (`start_byte == end_byte`) are
 insertions. xgrep fills `start_line`/`end_line` back on output.
 
-## NDJSON streaming (`--batch`)
+## Candidate streams (`fix candidate`)
 
-To author many candidates at once, stream newline-delimited candidates into
-`fix apply --batch`; xgrep streams one `FixOutcome` line per candidate as it
-completes:
+`xgrep fix candidate verify|apply` take one or more candidates or changesets, one
+per line, in any mix, and print one `FixOutcome` line per input. One candidate and
+many get the same shape:
 
 ```bash
-cat <<'EOF' | xgrep fix apply --batch
+cat <<'EOF' | xgrep fix candidate apply
 {"id":"f1","rule_id":"py-cookie","path":"src/a.py","edits":[{"start_byte":10,"end_byte":20,"replacement":"True"}]}
 {"id":"f2","rule_id":"py-cookie","path":"src/b.py","edits":[{"start_byte":30,"end_byte":40,"replacement":"True"}]}
 EOF
@@ -97,12 +99,14 @@ EOF
 
 Join each output line back to your input by `id` (and the finding by `fingerprint`).
 
+On an xgrep release without `fix candidate`, pipe candidates into `xgrep fix verify` / `xgrep fix apply` instead (that form is deprecated and goes away in xgrep v1.0). A stream there needs `--batch`, which takes single-file candidates only.
+
 ## Where the deterministic candidates come from
 
 You don't author deterministic edits — pipe the scan report and `fix` derives them
-from `extra.fix_info.edits`. Pipe candidates/changesets only for the `assisted` tier.
-A single `fix apply` invocation accepts a scan report, a candidate, a changeset, or
-(with `--batch`) an NDJSON candidate stream — but one shape per invocation.
+from `extra.fix_info.edits`. Author candidates and changesets only for the
+`assisted` tier, and send them to `xgrep fix candidate verify|apply`; a scan report
+goes to `xgrep fix verify|apply`.
 
 See [remediation-loop.md](remediation-loop.md) for the per-finding loop and
 [fix-contract-reference.md](fix-contract-reference.md) for the `fix_info` / contract schema.
