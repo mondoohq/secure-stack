@@ -1,9 +1,9 @@
 # Remediation loop & rejection-reason playbook
 
-The assisted loop is a closed cycle: author → `fix verify` → adjust → repeat →
-`fix apply`. xgrep never writes an edit it has not verified, so you can iterate
-freely without risk to the file (`fix verify` never writes; `fix apply` writes
-only the accepted edit).
+The assisted loop is a closed cycle: author → `fix candidate verify` → adjust →
+repeat → `fix candidate apply`. xgrep never writes an edit it has not verified, so
+you can iterate freely without risk to the file (`fix candidate verify` never
+writes; `fix candidate apply` writes only the accepted edit).
 
 ## The loop
 
@@ -17,19 +17,22 @@ xgrep scan --json --context 3 src/db.py > /tmp/f.json
 # 2. Read /tmp/f.json → extra.fix_info.contract (unsafe_region, strategy,
 #    acceptance_criteria) and the dataflow_trace / context evidence.
 
-# 3. Author edits over the file and verify (never writes):
-echo '{"path":"src/db.py","rule_id":"py-sql-injection","edits":[
+# 3. Author edits over the file and verify (never writes). One FixOutcome line
+#    comes back per candidate, matched by id:
+echo '{"id":"f1","path":"src/db.py","rule_id":"py-sql-injection","edits":[
   {"start_byte":420,"end_byte":480,"replacement":"cur.execute(\"… WHERE id=%s\", (uid,))"}
-]}' | xgrep fix verify
+]}' | xgrep fix candidate verify
 
-# 4. If rejected, adjust per the reason (below) and re-verify.
+# 4. If status is "rejected", adjust per the reason (below) and re-verify.
 
-# 5. When accepted, apply (fix apply always writes the accepted edit):
-echo '{…candidate…}' | xgrep fix apply
+# 5. When accepted, apply (writes the accepted edit):
+echo '{…candidate…}' | xgrep fix candidate apply
 
 # 6. Re-scan to confirm the finding cleared.
 xgrep scan --json src/db.py
 ```
+
+On an xgrep release without `fix candidate`, pipe the same candidate into `xgrep fix verify` / `xgrep fix apply` instead (that form is deprecated and goes away in xgrep v1.0).
 
 ## Rejection-reason playbook
 
@@ -50,8 +53,9 @@ When `accepted` is false, `reason` tells you exactly what failed:
 - **Keep edits tight.** The smallest span that satisfies the
   `acceptance_criteria` is least likely to hit `span-conflict` or
   `new-finding-introduced`.
-- **Verify before apply, always.** `fix verify` is read-only and returns the same
-  verdict `fix apply` will — use it to iterate, then `fix apply` once to commit.
+- **Verify before apply, always.** `fix candidate verify` is read-only and returns
+  the same verdict `fix candidate apply` will — use it to iterate, then apply once
+  to commit.
 - **Gate in CI.** `xgrep scan --json <target> | xgrep fix apply --strict` exits
   non-zero if any fix is rejected, so a pipeline can fail loudly instead of
   silently skipping. (`fix verify --strict` gates without writing.)

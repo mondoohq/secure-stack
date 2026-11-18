@@ -29,7 +29,7 @@ atomic write); you own the reasoning that authors any non-mechanical edit.
 **Rules are built in.** Every command below uses xgrep's bundled rules by default
 (600+ across 14 languages, security + secrets) — no `-f` needed. Pass `-f <rules-path>`
 only when the findings came from a *custom* rule pack; then add the **same** `-f` to
-every `scan` / `fix verify` / `fix apply` so the re-scan gate uses the rule that
+every `scan` / `fix verify` / `fix apply` / `fix candidate` so the re-scan gate uses the rule that
 produced the finding.
 
 ## Step 1 — Resolve the input (one artifact: `findings.json`)
@@ -107,11 +107,12 @@ whole flow when you're fixing a single finding — full playbook in the referenc
    the code graph (`xgrep graph context <fn> --depth 2`, `xgrep graph paths <src> <sink>`).
 3. Author byte-span replacements and verify (never writes):
    ```bash
-   echo '{"path":"src/db.py","rule_id":"py-sql-injection","edits":[
+   echo '{"id":"f1","path":"src/db.py","rule_id":"py-sql-injection","edits":[
      {"start_byte":420,"end_byte":480,"replacement":"cur.execute(\"… WHERE id=%s\", (uid,))"}]}' \
-     | xgrep fix verify
+     | xgrep fix candidate verify
    ```
-4. If `accepted` is false, adjust per `reason` and re-verify:
+   It prints one `FixOutcome` line per candidate, matched by `id`.
+4. If `status` is `rejected`, adjust per `reason` and re-verify:
 
    | `reason` | Next move |
    |---|---|
@@ -121,16 +122,19 @@ whole flow when you're fixing a single finding — full playbook in the referenc
    | `new-finding-introduced` | Inspect the new finding in the `diff`; pick a fix that doesn't trade one bug for another. |
    | `no-change` | Re-derive the span; ensure `replacement` differs from the spanned bytes. |
 
-5. Apply once accepted (`fix apply` writes the accepted edit atomically):
+5. Apply once accepted (`fix candidate apply` writes the accepted edit atomically):
    ```bash
-   echo '{…candidate…}' | xgrep fix apply
+   echo '{…candidate…}' | xgrep fix candidate apply
    ```
+
+   On an xgrep release without `fix candidate`, pipe the same candidate into `xgrep fix verify` / `xgrep fix apply` instead (that form is deprecated and goes away in xgrep v1.0).
 
 **Re-read offsets after every apply** — byte offsets are absolute, so every later
 offset in a file shifts once a write lands. Fix one finding fully (verify → apply →
 confirm) before moving to the next in the same file, or author all edits for a file
-against a single fresh scan. To author several candidates across files at once,
-stream them as NDJSON: `xgrep fix apply --batch` (one `FixOutcome` per line).
+against a single fresh scan. To submit several at once, pipe them all into one
+`xgrep fix candidate apply`: one candidate or cross-file changeset per line, in any
+mix, and one `FixOutcome` line back per input.
 
 For the full rejection-reason playbook and the fix-contract schema, see
 [remediation-loop.md]({baseDir}/references/remediation-loop.md) and
